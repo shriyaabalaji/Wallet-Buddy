@@ -24,6 +24,8 @@ import { SignError, signForRequest } from "./signer";
 import { PAY_NETWORK, PayError, network, payWithCircle, payerAddress, paymentMode } from "./payer";
 import { authConfig, authenticate, authSummary, type AuthConfig, type Principal } from "./auth";
 import { activityFilter, hourlySeries, listAgents, settlementOf, todayTotals } from "./overview";
+import { CATEGORIES as OPT_CATEGORIES } from "@agent-firewall/policy";
+import { DEMO_PROVIDERS, fetchQuote, listRecommendations, optimizerResolve, recommend, saveRecommendation } from "./optimizer";
 
 class HttpError extends Error {
   constructor(public status: number, message: string) {
@@ -346,6 +348,33 @@ route("POST", "/v1/payments/evaluate", "agent", async ({ db, body, who }) => {
   const { anomalies: _owner, ...decision } = res.decision;
   return { ...redactAnomalies(decision), duplicate: res.duplicate, policyHash: res.policyHash };
 });
+// Optimizer: advice only. It reads the providers' live 402 quotes (unpaid) and pre-checks your rules; it never
+// reserves, signs or pays. The agent still calls /v1/payments/evaluate, and the payer re-checks the 402 terms.
+route("POST", "/v1/optimizer/recommend", "ownerOrAgent", async ({ db, body, who }) => {
+  const agentId = typeof body?.agentId === "string" ? body.agentId : "";
+  const taskId = typeof body?.taskId === "string" && body.taskId ? body.taskId : "default";
+  const need = body?.need ?? {};
+  const maxAmountMicro = Number(body?.maxAmountMicro);
+  if (!agentId) throw new HttpError(400, "agentId is required");
+  if (typeof need.sku !== "string" || !need.sku) throw new HttpError(400, "need.sku is required");
+  if (!(OPT_CATEGORIES as readonly string[]).includes(need.category)) throw new HttpError(400, `need.category must be one of ${OPT_CATEGORIES.join(", ")}`);
+  if (!Number.isSafeInteger(maxAmountMicro) || maxAmountMicro <= 0) throw new HttpError(400, "maxAmountMicro must be a positive integer (micro-USDC)");
+  if (need.fields !== undefined && !(Array.isArray(need.fields) && need.fields.every((f: unknown) => typeof f === "string"))) throw new HttpError(400, "need.fields must be a list of strings");
+  assertActsFor(who, agentId);
+  requireAgent(db, agentId);
+  const requestId = typeof body?.requestId === "string" && body.requestId ? body.requestId : undefined;
+  const baselineProviderId = typeof body?.baselineProviderId === "string" ? body.baselineProviderId : undefined;
+  const base = process.env.SELLERS_URL ?? "http://localhost:4200";
+  const compatible = DEMO_PROVIDERS.filter((p) => p.sku === need.sku);
+  const quotes = await Promise.all(compatible.map((p) => fetchQuote(p, base, PAY_NETWORK)));
+  const policy = activePolicy(db, agentId);
+  const rec = recommend({ agentId, taskId, need, maxAmountMicro, baselineProviderId }, DEMO_PROVIDERS, quotes, {
+    rules: policy?.rules ?? null, state: spendState(db, agentId, taskId, new Date()), now: Date.now(), resolve: optimizerResolve,
+  });
+  const id = saveRecommendation(db, rec, requestId);
+  return { id, ...rec, sellersUrl: base };
+});
+route("GET", "/v1/optimizer/recommendations", "owner", ({ db, query }) => listRecommendations(db, query.get("agentId") ?? undefined));
 route("GET", "/v1/signer", "public", () => ({ address: payerAddress(), mode: paymentMode, network: PAY_NETWORK, arcNetwork: network }));
 /**
  * Request ids a /pay call is working on. payWithCircle awaits the seller probe before it claims signed_ms, so the

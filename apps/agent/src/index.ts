@@ -59,7 +59,7 @@ interface BuyResult {
 }
 
 /** Buy one x402 resource through the firewall. */
-export async function buy(path: string, opts: { recipient: string; category: Category; purpose: string; sourceContext?: string; taskId?: string }): Promise<BuyResult> {
+export async function buy(path: string, opts: { recipient: string; category: Category; purpose: string; sourceContext?: string; taskId?: string; requestId?: string }): Promise<BuyResult> {
   const url = SELLERS + path;
   const first = await fetch(url);
   if (first.status !== 402) return { outcome: "error", reason: `expected 402, got ${first.status}` };
@@ -68,7 +68,7 @@ export async function buy(path: string, opts: { recipient: string; category: Cat
   const option = (required.accepts ?? []).find((o: any) => o.network === network && o.extra?.name === "GatewayWalletBatched");
   if (!option) return { outcome: "error", reason: "seller has no Arc Gateway option" };
 
-  const requestId = `req_${randomUUID()}`;
+  const requestId = opts.requestId ?? `req_${randomUUID()}`;
   const decision = await post("/v1/payments/evaluate", {
     requestId, agentId: AGENT_ID, taskId: opts.taskId ?? TASK_ID, recipient: opts.recipient,
     amountMicro: Number(option.amount), category: opts.category, purpose: opts.purpose, sourceContext: opts.sourceContext,
@@ -165,10 +165,25 @@ async function attack() {
   if (d.outcome === "hold") console.log("  → the owner was texted. Reply NO to cancel; approving needs their passkey.");
 }
 
+
+async function optimize() {
+  // Ask the firewall's optimizer which demo seller to use for an injury report. Advice only: the purchase still goes
+  // through /evaluate (policy + reservation) and the payer re-checks the seller's 402 before paying.
+  console.log("\n▶ Optimizer: cheapest eligible seller for an injury report (both sellers are our demo providers)");
+  const requestId = `req_${randomUUID()}`;
+  const rec = await post("/v1/optimizer/recommend", { agentId: AGENT_ID, taskId: TASK_ID, need: { category: "data", sku: "injury-report" }, maxAmountMicro: 1_000_000, requestId });
+  for (const c of rec.candidates.filter((c: any) => c.compatible)) console.log(`  ${c.name.padEnd(20)} ${c.quote ? formatUsd(c.quote.amountMicro) : "—"}  ${c.reason}`);
+  console.log(`  → ${rec.explanation}`);
+  if (!rec.recommended) return;
+  const r = await buy(rec.recommended.path, { recipient: rec.recommended.recipient, category: "data", purpose: "An injury report (optimizer)", requestId });
+  log(`bought from ${rec.recommended.providerId}`, r);
+}
+
 const [phase = "all", count = "5"] = process.argv.slice(2);
 console.log(`Agent ${AGENT_ID} · task ${TASK_ID} · firewall ${FW} · sellers ${SELLERS}${MOCK ? " · MOCK payments" : ""}`);
 if (phase === "normal" || phase === "all") await normal(Number(count));
 if (phase === "race" || phase === "all") await race();
 if (phase === "attack" || phase === "all") await attack();
+if (phase === "optimize") await optimize();
 const s = (await (await fetch(`${FW}/v1/agents/${AGENT_ID}/summary`, { headers: AUTH })).json()) as any;
 console.log(`\nSpent on this task: ${formatUsd(s.task.spentMicro)}${s.task.budgetMicro ? ` of ${formatUsd(s.task.budgetMicro)}` : ""} · today: ${formatUsd(s.today.spentMicro)}${s.today.capMicro ? ` of ${formatUsd(s.today.capMicro)}` : ""}`);

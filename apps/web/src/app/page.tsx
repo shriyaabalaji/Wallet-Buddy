@@ -225,6 +225,7 @@ function Overview({ agentId }: { agentId: string }) {
         </div>
 
         <RiskPanel agentId={agentId} items={risk?.items ?? null} />
+        <PriceCheck agentId={agentId} />
         <FundingCard health={health} />
       </section>
     </>
@@ -326,6 +327,48 @@ function RiskPanel({ agentId, items }: { agentId: string; items: AnomalyItem[] |
           })}
         </ul>
       )}
+    </div>
+  );
+}
+
+// ---------- payment optimizer (demo providers only) ----------
+interface OptCandidate { providerId: string; name: string; demo: boolean; compatible: boolean; eligible: boolean; reason: string;
+  quote: { amountMicro: number; source: string; ageMs: number; fresh: boolean; latencyMs: number } | null }
+interface OptRec { candidates: OptCandidate[]; recommended: { providerId: string; amountMicro: number } | null;
+  baseline: { providerId: string; amountMicro: number; eligible: boolean } | null; estimatedSavingsMicro: number | null; explanation: string; demoProvidersOnly: boolean }
+interface OptHistory { items: { status: string; realizedSavingsMicro: number | null }[]; realizedSavingsMicro: number }
+function PriceCheck({ agentId }: { agentId: string }) {
+  const [rec, setRec] = useState<OptRec | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const { data: hist, refresh } = usePoll(() => api<OptHistory>(`/v1/optimizer/recommendations?agentId=${encodeURIComponent(agentId)}`), 15000, agentId);
+  async function check() {
+    setBusy(true); setErr(null);
+    try {
+      setRec(await api<OptRec>("/v1/optimizer/recommend", { method: "POST", body: { agentId, taskId: "price-check", need: { category: "data", sku: "injury-report" }, maxAmountMicro: 1_000_000 } }));
+      await refresh();
+    } catch (e) { setErr(e instanceof Error ? e.message : "Couldn't check prices."); } finally { setBusy(false); }
+  }
+  const settled = hist?.items.filter((i) => i.realizedSavingsMicro !== null).length ?? 0;
+  return (
+    <div className="card">
+      <div className="card-top">
+        <h2>Price check</h2>
+        <button className="btn secondary small" onClick={check} disabled={busy}>{busy ? "Checking…" : "Compare"}</button>
+      </div>
+      {err && <p className="warn-text small" role="alert">{err}</p>}
+      {rec && (
+        <ul className="pol">
+          {rec.candidates.filter((c) => c.compatible).map((c) => (
+            <li key={c.providerId}>
+              <span className="kind">{c.providerId === rec.recommended?.providerId ? "Best" : c.eligible ? "Option" : "Skipped"}</span>
+              <span>{c.name}: {c.quote ? formatUsd(c.quote.amountMicro) : "no quote"}{c.quote ? <span className="muted small"> · {Math.round(c.quote.ageMs / 1000)}s old · {c.quote.latencyMs}ms</span> : null}{!c.eligible && <span className="muted small"> · {c.reason}</span>}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {rec && <p className="small">{rec.estimatedSavingsMicro ? <>Estimated {formatUsd(rec.estimatedSavingsMicro)} cheaper than {rec.baseline?.providerId}, from live quotes. Not saved until a payment settles.</> : rec.recommended ? "No saving to claim." : "No eligible provider."}</p>}
+      <p className="lockline" style={{ marginTop: "auto" }}>Saved so far: {hist ? formatUsd(hist.realizedSavingsMicro) : "—"}<span className="muted small">&nbsp;({settled} settled purchase{settled === 1 ? "" : "s"} that followed a recommendation)</span></p>
     </div>
   );
 }

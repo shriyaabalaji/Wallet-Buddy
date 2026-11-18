@@ -9,6 +9,7 @@ cd "$ROOT/apps/firewall"
 # The throwaway buyer key goes ONLY to the firewall process (never exported, so the agent can't inherit it).
 eval "$(node --input-type=module -e 'import {generatePrivateKey,privateKeyToAccount} from "viem/accounts"; const a=()=>privateKeyToAccount(generatePrivateKey()).address; console.log(`DEMO_BUYER_KEY=${generatePrivateKey()}; export SELLER_ADDRESSES=sportsfeed=${a()},oddsapi=${a()}`)')"
 export MOCK_PAYMENTS=1
+export PAYMENT_MODE=local-key
 # Throwaway firewall credentials for this run: owner (used below to save rules) and one token per agent.
 tok() { node -e 'console.log(require("node:crypto").randomBytes(32).toString("base64url"))'; }
 OWNER_TOKEN=$(tok); RESEARCH_TOKEN=$(tok); RACE_TOKEN=$(tok)

@@ -67,9 +67,9 @@ export async function signForRequest(db: DB, requestId: string, td: any): Promis
   if (BigInt(m.validBefore) > BigInt(now + MAX_VALIDITY_S)) throw new SignError("Authorization lasts too long.");
   if (!/^0x[0-9a-fA-F]{64}$/.test(m.nonce ?? "")) throw new SignError("Bad nonce.");
 
-  // One signature per allowed request.
-  const claimed = immediate(db, () => db.prepare("UPDATE requests SET signed_ms=? WHERE request_id=? AND signed_ms IS NULL").run(Date.now(), requestId).changes > 0);
-  if (!claimed) throw new SignError("This payment was already signed.");
+  // One signature per allowed request, still reserved, for an agent that isn't paused (checked atomically with the claim).
+  const claimed = immediate(db, () => db.prepare("UPDATE requests SET signed_ms=? WHERE request_id=? AND signed_ms IS NULL AND status='reserved' AND agent_id IN (SELECT id FROM agents WHERE status='active')").run(Date.now(), requestId).changes > 0);
+  if (!claimed) throw new SignError("This payment was already signed, is no longer reserved, or its agent is paused.");
 
   return buyer.signTypedData({
     domain: { name: d.name, version: d.version, chainId: Number(d.chainId), verifyingContract: getAddress(d.verifyingContract) },

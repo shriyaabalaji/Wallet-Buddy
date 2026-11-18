@@ -127,10 +127,9 @@ describe("circle-agent-wallet mode", () => {
     expect(paymentsInFlight.has(id)).toBe(false);
   });
 
-  // Documents B6. The in-process guard above is what makes the timeout safe today. A release that ignores it (another
-  // process, or a future caller) still lets payWithCircle pay a reservation that was given back, because its signed_ms
-  // claim doesn't require status='reserved'. This flips to a normal passing test once payer.ts adds that condition.
-  it.fails("B6 (needs payer.ts): a reservation released mid-probe must not be paid", async () => {
+  // B6: the signed_ms claim requires status='reserved' and an active agent, so a reservation given back mid-probe
+  // (even by another process that ignores the in-process guard) can't be paid.
+  it("B6: a reservation released mid-probe must not be paid", async () => {
     const id = `req_b6_${Date.now()}`;
     expect((await evaluate(id)).json.outcome).toBe("allow");
     const pay = call("POST", `/v1/payments/${id}/pay`, ALICE, { url: `${SELLER_URL}/sportsfeed/injuries` });

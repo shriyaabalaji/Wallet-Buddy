@@ -63,6 +63,8 @@ forwarded without the owner token. Every POST must carry a same-site `Origin` (C
 | settlement | POST | `/v1/payments/:requestId/settled` | `{ txHash? }` | `{ ok }` |
 | settlement | POST | `/v1/payments/:requestId/failed` | | `{ ok }`; releases the reservation if it was never signed; after signing it becomes `unconfirmed` (counted until the owner reconciles) |
 | webhook | POST | `/v1/twilio/inbound` | Twilio form post | TwiML |
+| owner, or agent (own id) | POST | `/v1/optimizer/recommend` | `{ agentId, taskId?, need: { category, sku, fields? }, maxAmountMicro, baselineProviderId?, requestId? }` | `{ id, candidates[], recommended \| null, baseline, estimatedSavingsMicro, explanation, demoProvidersOnly, generatedAt, sellersUrl }`. Advice only: reads providers' live unpaid 402 quotes and pre-checks the rules; never reserves, signs or pays. Pass the `requestId` you will use for `/evaluate` to make a realized saving traceable |
+| owner | GET | `/v1/optimizer/recommendations?agentId=` | | `{ items: { id, sku, providerId, amountMicro, baselineProviderId, baselineMicro, estimatedSavingsMicro, requestId, status, realizedSavingsMicro }[], realizedSavingsMicro }`. Realized only when the linked payment settled to exactly the recommended recipient and amount |
 
 ## Anomaly detection
 

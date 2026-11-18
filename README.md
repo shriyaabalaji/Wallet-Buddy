@@ -97,6 +97,98 @@ We haven't found a documented Circle web console page for Agent Wallets.
 
 Without an `LLM_API_KEY`, the compiler falls back to an offline parser that handles the demo phrasings. The API reports `model: "offline-parser"`.
 
+## Owner controls, authentication, anomalies and the optimizer
+
+**Authentication** (`apps/firewall/src/auth.ts`, details in `docs/API.md`):
+- **Owner token** (`FIREWALL_OWNER_TOKEN`): rules, pause/resume, activity, reconciliation, passkey enrollment. Only the dashboard's server holds it. The browser gets an HttpOnly session cookie after `DASHBOARD_PASSWORD`, and `apps/web/src/lib/proxy.ts` forwards an allowlisted set of owner routes.
+- **Agent tokens** (`FIREWALL_AGENT_TOKENS="agent-id=token,…"`): each is bound to one agent id. It can evaluate and pay for that agent only. It can't change rules, resume itself, or read owner data.
+- **Service token** (`FIREWALL_SERVICE_TOKEN`, optional): may report `/settled` and `/failed`.
+- `FIREWALL_ALLOW_UNAUTHENTICATED_AGENTS=1` is a testnet migration switch. It is refused in production and on mainnet.
+
+**Spending policies** (`packages/policy`, deterministic, the same code for dry runs and live decisions):
+- `taskBudget`
+- `periodBudget` (day / week / month, UTC)
+- `perTxLimit`
+- `approvalThreshold` (hold for your passkey)
+- `allowlist` (unknown recipients hold by default, or block with `onViolation: "block"`)
+- `categories`
+- `timeWindow`
+- `rateLimit` (can pause the agent)
+- `anomalyGuard`
+- emergency pause
+
+Budgets are reserved atomically (`BEGIN IMMEDIATE`). Tests cover two processes racing, 6 processes × 10 requests on one task, and the same across 60 different tasks for the daily cap. A reservation that is never paid is released after `RESERVATION_TTL_MINUTES`. Uncertain outcomes stay counted until the owner reconciles them (`/v1/payments/:id/reconcile`).
+
+**Anomaly detection** (`apps/firewall/src/anomaly.ts`): explainable signals measured against the agent's own ledger history, computed inside the reservation transaction:
+- `AMOUNT_SPIKE`
+- `FREQUENCY_SPIKE`
+- `NEW_RECIPIENT`
+- `RAPID_BUDGET_DEPLETION`
+- `REPEATED_DENIALS`
+- `DUPLICATE_PATTERN`
+
+With little history they fall back to absolute thresholds (`ANOMALY_*` overrides). Signals never allow anything. They only change a decision through an `anomalyGuard` rule (hold, or block), and a hold never overrides a block. Agents never see the measured values (that would teach a hijacked agent to stay just under them); the owner does.
+
+**Multi-agent dashboard** (`apps/web`, owner sign-in):
+- an agent switcher, with per-agent overview: today's paid, in-progress and stopped money, budgets, an 8-hour chart, waiting approvals, rules, and "Locked on Arc" verification;
+- an "Unusual activity" panel;
+- funding and Arc status;
+- "Price check";
+- activity filters: agent, status, flagged, request id, needs reconciliation;
+- settlement-evidence labels: simulated, seller accepted / no reference, unverified, confirmed onchain;
+- agent registration and passkey approvals.
+
+**Payment optimizer** (`apps/firewall/src/optimizer.ts`): recommends the cheapest *suitable* provider for a capability.
+- **Advice only.** It never reserves, signs or pays. The agent still goes through `/evaluate`, and the payer re-checks the seller's live 402 (payee and amount) before paying, so the optimizer can't authorize anything the firewall would reject.
+- **Eligibility:**
+  - same SKU, category and output fields;
+  - a live 402 quote under `OPTIMIZER_QUOTE_TTL_MS` old;
+  - the 402 payee matches the configured recipient;
+  - the live price matches the configured price;
+  - within `maxAmountMicro`;
+  - a rules pre-check returns *allow* (a hold is not auto-recommended).
+- **Choosing:** cheapest wins. Ties go to measured quote latency, but only if every tied provider was measured; otherwise to provider id.
+- **Providers are our own demo sellers** (`statline` $0.05 and `sportsfeed` $0.02, the same injury report). There are no comparable external x402 providers on Arc testnet. **Estimated** saving = the live price difference against the usual provider, only if that provider was itself an eligible option. **Realized** saving = recorded only when the linked payment settled to exactly the recommended recipient and amount.
+
+### Real vs demo, at a glance
+| | Real | Demo / simulated |
+|---|---|---|
+| Network | Arc **testnet** by default. Mainnet code exists behind `NETWORK=mainnet`, untested pending funding | — |
+| Payments | `MOCK_PAYMENTS=0`: real x402 nanopayments through Circle Gateway, paid from a Circle Agent Wallet (verified: Circle reports the transfers `completed`) | `npm run demo:local`: throwaway keys, the seller accepts any signature |
+| Who enforces | Our firewall rules on every network. Circle Agent Wallet policies ($/day, allowlist) are **mainnet-only** and not part of the testnet demo | — |
+| Sellers | Real x402 / Gateway middleware | All sellers are ours (disclosed). The "compromised" seller is scripted |
+| "Settled" | The firewall marks a payment settled when Circle's CLI returns and the seller delivers. Gateway settles with sellers in batches later, so the dashboard labels this "seller accepted, no transaction reference" unless an onchain reference exists | — |
+| Savings | Realized only with a settled, matching payment | Estimated from live quotes of our two demo sellers |
+
+### Configuration (names only; values live in gitignored files)
+- **`.env.firewall`:**
+  - Network: `NETWORK` (shell only), `ARC_RPC_URL`, `ARC_CHAIN_ID`, `ARC_EXPLORER_URL`, `USDC_ADDRESS`
+  - Keys and contracts: `SERVICE_PRIVATE_KEY`, `OWNER_PRIVATE_KEY`, `OWNER_ADDRESS`, `TREASURY_ADDRESS`, `REGISTRY_ADDRESS`, `VAULT_ADDRESS`
+  - Payer: `PAYMENT_MODE`, `CIRCLE_AGENT_WALLET_ADDRESS`, `CIRCLE_GATEWAY_DEPOSITOR`, `CIRCLE_CHAIN`, `CIRCLE_CLI_BIN`, `PAY_NETWORK`, `PAY_URL_PREFIXES`, `BUYER_PRIVATE_KEY` (local-key only), `GATEWAY_WALLET_ADDRESSES`
+  - Sellers: `SELLER_ADDRESSES`, `SELLERS_URL`
+  - Funding: `GATEWAY_DAILY_TOPUP_USDC`, `BUYER_GAS_RESERVE_USDC`, `FUNDING`
+  - Auth: `FIREWALL_OWNER_TOKEN`, `FIREWALL_AGENT_TOKENS`, `FIREWALL_SERVICE_TOKEN`, `FIREWALL_ALLOW_UNAUTHENTICATED_AGENTS`
+  - Server: `FIREWALL_PORT`, `FIREWALL_DB`, `FIREWALL_PUBLIC_URL`, `APP_BASE_URL`, `WEBAUTHN_RP_ID`, `HOLD_MINUTES`, `RESERVATION_TTL_MINUTES`, `MOCK_PAYMENTS`
+  - Optimizer: `OPTIMIZER_QUOTE_TTL_MS`
+  - Text messages: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`, `OWNER_PHONE`
+  - Rules compiler: `LLM_API_KEY`
+- **`.env.firewall.mainnet`:** mainnet overrides.
+- **`apps/web/.env.local`:** `FIREWALL_URL`, `FIREWALL_OWNER_TOKEN`, `DASHBOARD_PASSWORD`, `DASHBOARD_SESSION_SECRET`, `DASHBOARD_ORIGIN`.
+- **`.env.agent`:** `FIREWALL_URL`, `SELLERS_URL`, `FIREWALL_AGENT_TOKEN`, `AGENT_ID`, `TASK_ID`, `MOCK_PAYMENTS`.
+- **`.env.sellers`:** `SELLER_ADDRESSES`, `SELLERS_PORT`, `MOCK_PAYMENTS`, `MAINNET_SELLER_ADDRESS`, `MAINNET_SELLERS_PORT`.
+
+### Test and demo
+```bash
+npm test                      # policy + firewall (incl. multi-process races, auth, anomalies, optimizer, security regressions) + web proxy/session
+npm run typecheck
+npm run test:contracts        # Foundry
+npm run demo:local            # offline, mock settlement, repeatable
+# live testnet (firewall :4000, sellers :4200, dashboard :3000 running):
+set -a; . ./.env.firewall; set +a
+npx tsx scripts/stress-api.ts       # needs stress-agent in FIREWALL_AGENT_TOKENS (+ FIREWALL_SERVICE_TOKEN)
+npx tsx scripts/demo-scenarios.ts   # scenarios A–F; needs demo-agent in FIREWALL_AGENT_TOKENS
+```
+
 ## Safety limits (read this)
 
 What is actually enforced, and where. The payer is a **Circle Agent Wallet** on both networks. Agent Wallets are smart-contract accounts, and nanopayments don't accept their signatures, so the firewall can't hand out a signature. Instead it checks the seller's 402 (payee and amount) against the reservation, then pays with Circle's documented `circle services pay <url> --max-amount <reserved>`. The agent gets only the response (`docs/RESEARCH.md` Q10).
@@ -132,3 +224,8 @@ What is actually enforced, and where. The payer is a **Circle Agent Wallet** on 
 - **The sellers are ours,** run for the demo. Arc testnet has no comparable real x402 sellers (`docs/RESEARCH.md`, Q6).
 - **The "hijacked agent" in the demo is scripted to obey the injection.** That's the point: the firewall holds even when the agent doesn't.
 - **Injection flags are heuristics,** shown only to the human. They never cause a payment to be allowed.
+- **The optimizer's providers are our two demo sellers.** No external comparable x402 providers are integrated. Savings are the price difference between them, and are "realized" only for a settled payment that followed the recommendation.
+- **Mainnet is untested.** The code path exists, but the Circle policy tests (cap and allowlist enforced by Circle) haven't run because the mainnet wallet isn't funded yet.
+- **"Settled" means the seller accepted and delivered after Circle took the payment.** Gateway settles with sellers in batches, and the Agent Wallet CLI returns no transaction reference, so the dashboard doesn't claim an onchain confirmation for these.
+- **Passkey approval** was verified live on 2026-11-16. The current database was recreated on 2026-11-17, so the owner must enroll a passkey again before approving holds.
+- **Optimizer requests aren't rate-limited.** An agent can request recommendations repeatedly. Each one makes unpaid 402 calls to our sellers and stores a row. Fine for a demo; add a limit before real use.

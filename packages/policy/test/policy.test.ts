@@ -195,3 +195,11 @@ describe("anomalyGuard (anomaly signals come from the firewall's ledger; evaluat
     expect(policyHash(demoRules)).toBe(policyHash([...demoRules])); // existing hashes unchanged
   });
 });
+
+describe("describeRule: allowlist wording follows onViolation", () => {
+  it("says blocked when unknown recipients are blocked, and asks otherwise", async () => {
+    const { describeRule } = await import("../src/describe");
+    expect(describeRule({ id: "a", kind: "allowlist", recipients: ["sportsfeed"], onViolation: "block" })).toMatch(/Anyone else is blocked/);
+    expect(describeRule({ id: "a", kind: "allowlist", recipients: ["sportsfeed"] })).toMatch(/needs your OK/);
+  });
+});

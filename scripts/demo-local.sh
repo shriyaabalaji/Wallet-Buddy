@@ -5,6 +5,8 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 WORK=${WORK:-$(mktemp -d)}; mkdir -p "$WORK"
 FWP=${FWP:-4300}; SP=${SP:-4301}
+# Refuse to run against something already on our ports (a stale seller from an earlier run would answer instead).
+for p in $FWP $SP; do if lsof -ti ":$p" >/dev/null 2>&1; then echo "Port $p is in use; stop that process (lsof -ti :$p | xargs kill) and retry." >&2; exit 1; fi; done
 cd "$ROOT/apps/firewall"
 # The throwaway buyer key goes ONLY to the firewall process (never exported, so the agent can't inherit it).
 eval "$(node --input-type=module -e 'import {generatePrivateKey,privateKeyToAccount} from "viem/accounts"; const a=()=>privateKeyToAccount(generatePrivateKey()).address; console.log(`DEMO_BUYER_KEY=${generatePrivateKey()}; export SELLER_ADDRESSES=sportsfeed=${a()},oddsapi=${a()}`)')"
@@ -19,7 +21,9 @@ LEGACY_AGENTS=0; grep -q FIREWALL_AGENT_TOKEN "$ROOT/scripts/run-agent.sh" || LE
 FIREWALL_OWNER_TOKEN="$OWNER_TOKEN" FIREWALL_AGENT_TOKENS="research-agent=$RESEARCH_TOKEN,race-agent=$RACE_TOKEN" FIREWALL_ALLOW_UNAUTHENTICATED_AGENTS=$LEGACY_AGENTS \
 BUYER_PRIVATE_KEY="$DEMO_BUYER_KEY" FIREWALL_DB="$WORK/demo.db" FIREWALL_PORT=$FWP npx tsx src/index.ts > "$WORK/firewall.log" 2>&1 & FW_PID=$!
 (cd "$ROOT/apps/sellers" && SELLERS_PORT=$SP npx tsx src/index.ts > "$WORK/sellers.log" 2>&1) & S_PID=$!
-trap 'kill $FW_PID $S_PID 2>/dev/null || true' EXIT
+# Kill by port too: $S_PID is a subshell, and killing it alone leaves the seller's node process running.
+cleanup() { set +e; kill "$FW_PID" "$S_PID" 2>/dev/null; for p in "$FWP" "$SP"; do pids=$(lsof -ti ":$p" 2>/dev/null); [ -n "$pids" ] && kill $pids 2>/dev/null; done; return 0; }
+trap cleanup EXIT
 for i in $(seq 1 30); do curl -sf "localhost:$FWP/health" >/dev/null && curl -sf "localhost:$SP/health" >/dev/null && break; sleep 0.5; done
 post() { curl -s "localhost:$FWP$1" -H 'Content-Type: application/json' -H "Authorization: Bearer $OWNER_TOKEN" -d "$2"; }
 post /v1/policy '{"agentId":"research-agent","confirmed":true,"notify":{"phone":"+15125550100","events":["hold"]},"rules":[{"id":"task-budget","kind":"taskBudget","taskId":"*","maxMicro":10000000},{"id":"day-budget","kind":"periodBudget","period":"day","maxMicro":5000000},{"id":"ask-first","kind":"approvalThreshold","aboveMicro":1000000},{"id":"approved-recipients","kind":"allowlist","recipients":["sportsfeed","oddsapi"]}]}' >/dev/null

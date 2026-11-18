@@ -1,5 +1,5 @@
 import { formatUsd } from "./money";
-import type { Decision, PaymentRequest, Rule, RuleKind, Severity, SpendState, Violation } from "./types";
+import { ANOMALY_SEVERITIES, type AnomalySignal, type Decision, type PaymentRequest, type Rule, type RuleKind, type Severity, type SpendState, type Violation } from "./types";
 
 /**
  * Default severity per rule kind.
@@ -19,6 +19,7 @@ export const DEFAULT_SEVERITY: Record<RuleKind, Severity> = {
   periodBudget: "block",
   allowlist: "hold",
   approvalThreshold: "hold",
+  anomalyGuard: "hold",
 };
 
 export interface EvaluateOptions {
@@ -50,8 +51,9 @@ export function evaluate(
   const v = (rule: Rule, reason: string) =>
     violations.push({ ruleId: rule.id, kind: rule.kind, severity: rule.onViolation ?? DEFAULT_SEVERITY[rule.kind], reason });
 
+  const anomalies = state.anomalies ?? [];
   if (!Number.isSafeInteger(amt) || amt <= 0) {
-    return finish(req, now, [{ ruleId: "input", kind: "perTxLimit", severity: "block", reason: "Amount must be a positive whole number of micro-USDC." }], false, []);
+    return finish(req, now, [{ ruleId: "input", kind: "perTxLimit", severity: "block", reason: "Amount must be a positive whole number of micro-USDC." }], false, [], anomalies);
   }
 
   if (state.paused) {
@@ -98,6 +100,11 @@ export function evaluate(
       case "approvalThreshold":
         if (amt > rule.aboveMicro) v(rule, `${formatUsd(amt)} is over ${formatUsd(rule.aboveMicro)}, so it needs your OK.`);
         break;
+      case "anomalyGuard": {
+        const hit = guardedAnomalies(rule, anomalies);
+        if (hit.length) v(rule, `Unusual activity: ${hit[0]!.explanation}${hit.length > 1 ? ` (+${hit.length - 1} more signal${hit.length > 2 ? "s" : ""})` : ""}`);
+        break;
+      }
       default: {
         const _exhaustive: never = rule;
         throw new Error(`unknown rule ${JSON.stringify(_exhaustive)}`);
@@ -105,10 +112,20 @@ export function evaluate(
     }
   }
 
-  return finish(req, now, violations, triggerPause, injectionFlags(rules, req, opts));
+  return finish(req, now, violations, triggerPause, injectionFlags(rules, req, opts), anomalies);
 }
 
-function finish(req: PaymentRequest, now: Date, violations: Violation[], triggerPause: boolean, flags: string[]): Decision {
+const rank = (s: string) => ANOMALY_SEVERITIES.indexOf(s as (typeof ANOMALY_SEVERITIES)[number]);
+
+/** Signals an anomalyGuard rule reacts to, most severe first. Default threshold: "high". */
+export function guardedAnomalies(rule: Extract<Rule, { kind: "anomalyGuard" }>, anomalies: AnomalySignal[]): AnomalySignal[] {
+  const min = rank(rule.minSeverity ?? "high");
+  return anomalies
+    .filter((a) => rank(a.severity) >= min && (!rule.signals?.length || rule.signals.includes(a.type)))
+    .sort((a, b) => rank(b.severity) - rank(a.severity));
+}
+
+function finish(req: PaymentRequest, now: Date, violations: Violation[], triggerPause: boolean, flags: string[], anomalies: AnomalySignal[]): Decision {
   const block = violations.find((x) => x.severity === "block");
   // Prefer the allowlist reason for holds: "unknown recipient" tells the human more than "over $1".
   const hold = violations.find((x) => x.severity === "hold" && x.kind === "allowlist") ?? violations.find((x) => x.severity === "hold");
@@ -121,6 +138,7 @@ function finish(req: PaymentRequest, now: Date, violations: Violation[], trigger
     violations,
     triggerPause,
     flags,
+    anomalies,
     at: now.toISOString(),
   };
 }

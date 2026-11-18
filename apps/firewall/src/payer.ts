@@ -87,9 +87,10 @@ export async function payWithCircle(db: DB, requestId: string, url: string): Pro
     throw e;
   }
 
-  // One payment per allowed request (same claim the local signer uses).
-  const claimed = immediate(db, () => db.prepare("UPDATE requests SET signed_ms=? WHERE request_id=? AND signed_ms IS NULL").run(Date.now(), requestId).changes > 0);
-  if (!claimed) throw new PayError("This payment was already made.");
+  // One payment per allowed request (same claim the local signer uses). Re-checked here, after the seller probe, so a
+  // reservation released or an agent paused while we waited can't be paid.
+  const claimed = immediate(db, () => db.prepare("UPDATE requests SET signed_ms=? WHERE request_id=? AND signed_ms IS NULL AND status='reserved' AND agent_id IN (SELECT id FROM agents WHERE status='active')").run(Date.now(), requestId).changes > 0);
+  if (!claimed) throw new PayError("This payment was already made, is no longer reserved, or its agent is paused.");
 
   const maxUsd = (Number(row.amount_micro) / 1e6).toFixed(6);
   try {

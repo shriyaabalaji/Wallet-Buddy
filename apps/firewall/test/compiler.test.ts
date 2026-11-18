@@ -19,4 +19,12 @@ describe("offline compiler (no API key)", () => {
     expect(r.ambiguities.map((a) => a.phrase)).toContain("goes crazy");
     expect(r.rules.find((x) => x.kind === "timeWindow")).toMatchObject({ startHour: 9, endHour: 21 });
   });
+
+  it("turns an explicit request about unusual activity into an anomalyGuard rule, and nothing else does", async () => {
+    const r = await compileRules("Up to $10 for this task. Hold anything unusual for my OK.");
+    expect(r.errors).toEqual([]);
+    expect(r.rules.find((x) => x.kind === "anomalyGuard")).toMatchObject({ id: "unusual-activity", minSeverity: "high" });
+    const demo = await compileRules("Up to $10 for this task, $5 a day. Text me before anything over $1. Only pay sportsfeed and oddsapi.");
+    expect(demo.rules.some((x) => x.kind === "anomalyGuard")).toBe(false);
+  });
 });

@@ -1,4 +1,4 @@
-import { CATEGORIES, type Rule } from "./types";
+import { ANOMALY_SEVERITIES, ANOMALY_TYPES, CATEGORIES, type Rule } from "./types";
 
 /**
  * Strict runtime validation for rules coming from the LLM compiler or the API.
@@ -54,6 +54,11 @@ export function validateRules(input: unknown): { rules: Rule[]; errors: string[]
         if (!money("aboveMicro")) return errors.push(`${at}: aboveMicro must be a non-negative integer`);
         break;
       case "paused":
+        break;
+      case "anomalyGuard":
+        if (r.minSeverity !== undefined && !(ANOMALY_SEVERITIES as readonly string[]).includes(r.minSeverity)) return errors.push(`${at}: minSeverity must be ${ANOMALY_SEVERITIES.join("|")}`);
+        if (r.signals !== undefined && (!Array.isArray(r.signals) || !r.signals.every((s: any) => (ANOMALY_TYPES as readonly string[]).includes(s))))
+          return errors.push(`${at}: signals must be a list of ${ANOMALY_TYPES.join(", ")}`);
         break;
       default:
         return errors.push(`${at}: unknown kind ${r.kind}`);

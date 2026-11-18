@@ -93,7 +93,8 @@ CREATE TABLE IF NOT EXISTS sms_log (
 );
 `;
 
-// "unconfirmed" = failed after the firewall signed: the seller may still settle that authorization, so it keeps counting.
+// "unconfirmed" = failed after the firewall signed (or the Circle CLI ran): the payment may exist, so it keeps
+// counting until the owner reconciles it. It is never released automatically.
 export const SPENDING_STATUSES = ["reserved", "settled", "held", "approved", "unconfirmed"] as const;
 export const SPENDING_SQL = `('reserved','settled','held','approved','unconfirmed')`;
 
@@ -103,6 +104,16 @@ export function openDb(path: string): DB {
   db.exec(SCHEMA);
   try { db.exec("ALTER TABLE holds ADD COLUMN hold_error TEXT"); } catch { /* already there */ }
   try { db.exec("ALTER TABLE requests ADD COLUMN failure_reason TEXT"); } catch { /* already there */ }
+  // Anomaly signals measured for each request (anomaly.ts). Old rows read as "no signals".
+  try { db.exec("ALTER TABLE requests ADD COLUMN anomalies_json TEXT NOT NULL DEFAULT '[]'"); } catch { /* already there */ }
+  // 1 = settled while the firewall ran with MOCK_PAYMENTS=1 (no money moved). Old rows read as real.
+  try { db.exec("ALTER TABLE requests ADD COLUMN simulated INTEGER NOT NULL DEFAULT 0"); } catch { /* already there */ }
+  // When the owner resolved an uncertain outcome by hand (POST /v1/payments/:id/reconcile).
+  try { db.exec("ALTER TABLE requests ADD COLUMN reconciled_ms INTEGER"); } catch { /* already there */ }
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS requests_agent_recipient ON requests(agent_id, lower(recipient));
+    CREATE INDEX IF NOT EXISTS requests_agent_anomalous ON requests(agent_id, created_ms) WHERE anomalies_json <> '[]';
+  `);
   return db;
 }
 

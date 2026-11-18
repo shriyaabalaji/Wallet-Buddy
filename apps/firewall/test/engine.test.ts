@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { policyHash, usdToMicro, type Rule } from "@agent-firewall/policy";
 import { openDb, type DB } from "../src/db";
-import { evaluateAndReserve, markFailed, releaseExpiredUnconfirmed, savePolicy, spendState } from "../src/engine";
+import { evaluateAndReserve, markFailed, reconcilePayment, releaseStaleReservations, savePolicy, spendState } from "../src/engine";
 
 const run = promisify(execFile);
 let dir: string;
@@ -53,17 +53,20 @@ describe("engine", () => {
     expect(evaluateAndReserve(db, req("c", 800_000)).decision.outcome).toBe("allow");
   });
 
-  it("keeps counting a payment that failed AFTER signing, until the authorization expires", () => {
+  it("keeps counting a payment that failed AFTER signing until the owner reconciles it; never released by time alone", () => {
     savePolicy(db, "race-agent", rules(usdToMicro(1)), policyHash(rules(usdToMicro(1))));
     evaluateAndReserve(db, req("a", 800_000));
     db.prepare("UPDATE requests SET signed_ms=? WHERE request_id='a'").run(Date.now());
     expect(markFailed(db, "a")).toBe(true);
-    // The seller could still settle the signed authorization, so the budget is NOT returned.
+    // The seller may already have settled the signed authorization, so the budget is NOT returned.
     expect(evaluateAndReserve(db, req("b", 800_000)).decision.outcome).toBe("block");
     expect(spendState(db, "race-agent", "race-task", new Date()).taskSpentMicro).toBe(800_000);
-    // Once the authorization can no longer be settled, it is released.
-    expect(releaseExpiredUnconfirmed(db, Date.now() + 10 * 24 * 3600_000)).toBe(1);
-    expect(evaluateAndReserve(db, req("c", 800_000)).decision.outcome).toBe("allow");
+    // Not even long after the authorization could have expired.
+    expect(releaseStaleReservations(db, { now: Date.now() + 30 * 24 * 3600_000, ttlMs: 15 * 60_000 })).toEqual([]);
+    expect(evaluateAndReserve(db, req("c", 800_000)).decision.outcome).toBe("block");
+    // Only an owner reconciliation returns it.
+    expect(reconcilePayment(db, "a", "not_paid", { note: "checked Gateway history" })).toEqual({ status: "released" });
+    expect(evaluateAndReserve(db, req("d", 800_000)).decision.outcome).toBe("allow");
   });
 
   it("holds return a token and count against budget", () => {

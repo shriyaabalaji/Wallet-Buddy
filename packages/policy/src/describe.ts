@@ -30,7 +30,7 @@ export function describeRule(rule: Rule): string {
     case "categories":
       return `Only buy ${rule.allowed.join(", ")}.`;
     case "allowlist":
-      return `Only pay ${rule.recipients.join(", ")}. Anyone else needs your OK.`;
+      return `Only pay ${rule.recipients.join(", ")}. ${rule.onViolation === "block" ? "Anyone else is blocked." : "Anyone else needs your OK."}`;
     case "timeWindow": {
       const days = rule.days.length === 0 || rule.days.length === 7 ? "any day" : rule.days.map((d) => DAY_NAMES[d]).join(", ");
       return `Only spend ${hour(rule.startHour)}–${hour(rule.endHour)} (${rule.tz}), ${days}.`;
@@ -41,5 +41,10 @@ export function describeRule(rule: Rule): string {
       return `Text me before any payment over ${formatUsd(rule.aboveMicro)}.`;
     case "paused":
       return "All spending is paused.";
+    case "anomalyGuard": {
+      const level = rule.minSeverity === "low" ? "even slightly unusual" : rule.minSeverity === "medium" ? "unusual" : "highly unusual";
+      const which = rule.signals?.length ? ` (${rule.signals.map((s) => s.toLowerCase().replace(/_/g, " ")).join(", ")})` : "";
+      return `${rule.onViolation === "block" ? "Block payments" : "Ask for your OK"} when spending looks ${level} for this agent${which}.`;
+    }
   }
 }

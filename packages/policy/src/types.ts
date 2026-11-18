@@ -24,9 +24,30 @@ export type Rule =
   | (RuleBase & { kind: "timeWindow"; days: number[]; startHour: number; endHour: number; tz: string })
   | (RuleBase & { kind: "rateLimit"; maxPerMinute: number; action: "pause" })
   | (RuleBase & { kind: "approvalThreshold"; aboveMicro: number })
-  | (RuleBase & { kind: "paused" });
+  | (RuleBase & { kind: "paused" })
+  /**
+   * Escalate (hold by default) when the firewall's anomaly detector reports a signal at or above minSeverity.
+   * Without this rule anomalies are only recorded and shown to the owner; they never change a decision.
+   * Like every hold, it never overrides a block.
+   */
+  | (RuleBase & { kind: "anomalyGuard"; minSeverity?: AnomalySeverity; signals?: AnomalyType[] });
 
 export type RuleKind = Rule["kind"];
+
+export const ANOMALY_TYPES = ["AMOUNT_SPIKE", "FREQUENCY_SPIKE", "NEW_RECIPIENT", "RAPID_BUDGET_DEPLETION", "REPEATED_DENIALS", "DUPLICATE_PATTERN"] as const;
+export type AnomalyType = (typeof ANOMALY_TYPES)[number];
+export const ANOMALY_SEVERITIES = ["low", "medium", "high"] as const;
+export type AnomalySeverity = (typeof ANOMALY_SEVERITIES)[number];
+
+/** One explainable anomaly signal for a proposed payment, measured against the agent's own prior activity. */
+export interface AnomalySignal {
+  type: AnomalyType;
+  severity: AnomalySeverity;
+  /** Plain-English reason for the owner. */
+  explanation: string;
+  /** The numbers behind the explanation (micro-USDC, counts, ms, percentages). */
+  measured: Record<string, number | string | boolean>;
+}
 
 export interface Policy {
   id: string;
@@ -70,6 +91,8 @@ export interface Decision {
   triggerPause: boolean;
   /** Heuristic flags for the human (e.g. possible injection). Never used to allow. */
   flags: string[];
+  /** Anomaly signals the firewall measured for this request (empty when none were computed). Never used to allow. */
+  anomalies: AnomalySignal[];
   at: string;
 }
 
@@ -83,4 +106,6 @@ export interface SpendState {
   requestsLastMinute: number;
   /** Whether the agent is currently paused (emergency pause or rate-limit trip). */
   paused: boolean;
+  /** Anomaly signals for this request, computed by the store from the ledger (optional; absent in dry runs). */
+  anomalies?: AnomalySignal[];
 }

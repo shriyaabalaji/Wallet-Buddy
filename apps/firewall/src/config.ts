@@ -12,6 +12,10 @@ export const config = {
   publicUrl: env("FIREWALL_PUBLIC_URL") ?? `http://localhost:${env("FIREWALL_PORT") ?? 4000}`,
   devMode: process.env.NODE_ENV !== "production",
   holdMinutes: Number(env("HOLD_MINUTES") ?? 15),
+  /** An allowed payment never signed or paid within this long gives its budget back (engine.releaseStaleReservations). */
+  reservationTtlMinutes: Math.max(5, Number(env("RESERVATION_TTL_MINUTES") ?? 15) || 15),
+  /** Sellers accept any payment header (local demo): settlements are recorded as simulated. */
+  mockPayments: env("MOCK_PAYMENTS") === "1",
   arc: {
     rpcUrl: env("ARC_RPC_URL") ?? "https://rpc.testnet.arc.io",
     chainId: Number(env("ARC_CHAIN_ID") ?? 5042002),

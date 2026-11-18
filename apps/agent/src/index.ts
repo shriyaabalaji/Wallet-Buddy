@@ -24,9 +24,14 @@ const AGENT_ID = process.env.AGENT_ID ?? "research-agent";
 const TASK_ID = process.env.TASK_ID ?? "nba-injuries";
 const MOCK = process.env.MOCK_PAYMENTS === "1";
 const MIN_VALIDITY_S = 8 * 24 * 3600;
+// This agent's own firewall credential, bound to AGENT_ID (FIREWALL_AGENT_TOKENS on the firewall). It can only
+// request payments for this agent; it can't change rules or resume the agent.
+const TOKEN = process.env.FIREWALL_AGENT_TOKEN?.trim();
+const AUTH: Record<string, string> = TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {};
+if (!TOKEN) console.warn("FIREWALL_AGENT_TOKEN is not set; the firewall will refuse this agent unless it allows unauthenticated agents (testnet only).");
 
 const post = async (path: string, body: unknown) => {
-  const r = await fetch(FW + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const r = await fetch(FW + path, { method: "POST", headers: { "Content-Type": "application/json", ...AUTH }, body: JSON.stringify(body) });
   const j = (await r.json()) as any;
   if (!r.ok) throw new Error(j.error ?? `HTTP ${r.status}`);
   return j;
@@ -54,7 +59,7 @@ interface BuyResult {
 }
 
 /** Buy one x402 resource through the firewall. */
-export async function buy(path: string, opts: { recipient: string; category: Category; purpose: string; sourceContext?: string; taskId?: string }): Promise<BuyResult> {
+export async function buy(path: string, opts: { recipient: string; category: Category; purpose: string; sourceContext?: string; taskId?: string; requestId?: string }): Promise<BuyResult> {
   const url = SELLERS + path;
   const first = await fetch(url);
   if (first.status !== 402) return { outcome: "error", reason: `expected 402, got ${first.status}` };
@@ -63,7 +68,7 @@ export async function buy(path: string, opts: { recipient: string; category: Cat
   const option = (required.accepts ?? []).find((o: any) => o.network === network && o.extra?.name === "GatewayWalletBatched");
   if (!option) return { outcome: "error", reason: "seller has no Arc Gateway option" };
 
-  const requestId = `req_${randomUUID()}`;
+  const requestId = opts.requestId ?? `req_${randomUUID()}`;
   const decision = await post("/v1/payments/evaluate", {
     requestId, agentId: AGENT_ID, taskId: opts.taskId ?? TASK_ID, recipient: opts.recipient,
     amountMicro: Number(option.amount), category: opts.category, purpose: opts.purpose, sourceContext: opts.sourceContext,
@@ -160,10 +165,25 @@ async function attack() {
   if (d.outcome === "hold") console.log("  → the owner was texted. Reply NO to cancel; approving needs their passkey.");
 }
 
+
+async function optimize() {
+  // Ask the firewall's optimizer which demo seller to use for an injury report. Advice only: the purchase still goes
+  // through /evaluate (policy + reservation) and the payer re-checks the seller's 402 before paying.
+  console.log("\n▶ Optimizer: cheapest eligible seller for an injury report (both sellers are our demo providers)");
+  const requestId = `req_${randomUUID()}`;
+  const rec = await post("/v1/optimizer/recommend", { agentId: AGENT_ID, taskId: TASK_ID, need: { category: "data", sku: "injury-report" }, maxAmountMicro: 1_000_000, requestId });
+  for (const c of rec.candidates.filter((c: any) => c.compatible)) console.log(`  ${c.name.padEnd(20)} ${c.quote ? formatUsd(c.quote.amountMicro) : "—"}  ${c.reason}`);
+  console.log(`  → ${rec.explanation}`);
+  if (!rec.recommended) return;
+  const r = await buy(rec.recommended.path, { recipient: rec.recommended.recipient, category: "data", purpose: "An injury report (optimizer)", requestId });
+  log(`bought from ${rec.recommended.providerId}`, r);
+}
+
 const [phase = "all", count = "5"] = process.argv.slice(2);
 console.log(`Agent ${AGENT_ID} · task ${TASK_ID} · firewall ${FW} · sellers ${SELLERS}${MOCK ? " · MOCK payments" : ""}`);
 if (phase === "normal" || phase === "all") await normal(Number(count));
 if (phase === "race" || phase === "all") await race();
 if (phase === "attack" || phase === "all") await attack();
-const s = (await (await fetch(`${FW}/v1/agents/${AGENT_ID}/summary`)).json()) as any;
+if (phase === "optimize") await optimize();
+const s = (await (await fetch(`${FW}/v1/agents/${AGENT_ID}/summary`, { headers: AUTH })).json()) as any;
 console.log(`\nSpent on this task: ${formatUsd(s.task.spentMicro)}${s.task.budgetMicro ? ` of ${formatUsd(s.task.budgetMicro)}` : ""} · today: ${formatUsd(s.today.spentMicro)}${s.today.capMicro ? ` of ${formatUsd(s.today.capMicro)}` : ""}`);

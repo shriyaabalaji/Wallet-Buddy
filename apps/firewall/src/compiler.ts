@@ -20,7 +20,7 @@ export interface CompileResult {
 const MODEL = "claude-opus-5-5";
 
 const DraftRule = z.object({
-  kind: z.enum(["perTxLimit", "taskBudget", "periodBudget", "categories", "allowlist", "timeWindow", "rateLimit", "approvalThreshold", "paused"]),
+  kind: z.enum(["perTxLimit", "taskBudget", "periodBudget", "categories", "allowlist", "timeWindow", "rateLimit", "approvalThreshold", "paused", "anomalyGuard"]),
   amountUsd: z.number().nullable().describe("Dollar amount for limits, budgets and approval thresholds; null otherwise"),
   period: z.enum(["day", "week", "month"]).nullable(),
   categories: z.array(z.enum(CATEGORIES)).nullable(),
@@ -30,6 +30,7 @@ const DraftRule = z.object({
   endHour: z.number().int().nullable().describe("Exclusive, 0-24"),
   tz: z.string().nullable().describe("IANA timezone"),
   maxPerMinute: z.number().int().nullable(),
+  minSeverity: z.enum(["low", "medium", "high"]).nullable().describe("anomalyGuard only: how unusual activity must be before it is held; default high"),
   sourcePhrase: z.string().describe("The exact words in the user's text this rule came from"),
 });
 const Draft = z.object({
@@ -49,6 +50,7 @@ Rule kinds:
 - rateLimit: pause the agent if more than maxPerMinute payments in a minute.
 - approvalThreshold: text the owner and hold payments above amountUsd.
 - paused: stop all spending.
+- anomalyGuard: hold payments for the owner when activity is unusual compared with the agent's own history (big jumps in amount, bursts, new recipients, budget burned fast, repeated denials, duplicate purchases). minSeverity: low|medium|high (default high). Use it only when the user explicitly asks to be asked about unusual or suspicious activity; it never replaces a number they gave.
 Only emit rules the text actually states. Never invent limits. If a phrase is vague (e.g. "goes crazy", "a lot", "reasonable", "expensive"), do NOT guess a number: add it to ambiguities with a short clarifying question. If no timezone is given for a time window, use America/Chicago and add an ambiguity.`;
 
 export async function compileRules(text: string): Promise<CompileResult> {
@@ -99,6 +101,7 @@ function finalize(draft: DraftT, model: string): CompileResult {
         break;
       case "rateLimit": if (d.maxPerMinute) rules.push({ id: id("rate-limit"), kind: "rateLimit", maxPerMinute: d.maxPerMinute, action: "pause" }); break;
       case "paused": rules.push({ id: id("paused"), kind: "paused" }); break;
+      case "anomalyGuard": rules.push({ id: id("unusual-activity"), kind: "anomalyGuard", minSeverity: d.minSeverity ?? "high" }); break;
     }
   }
   const v = validateRules(rules);
@@ -112,7 +115,7 @@ const VAGUE = ["goes crazy", "go crazy", "a lot", "too much", "reasonable", "exp
 export function offlineDraft(text: string): DraftT {
   const t = text.toLowerCase();
   const rules: DraftT["rules"] = [];
-  const blank = { amountUsd: null, period: null, categories: null, recipients: null, days: null, startHour: null, endHour: null, tz: null, maxPerMinute: null };
+  const blank = { amountUsd: null, period: null, categories: null, recipients: null, days: null, startHour: null, endHour: null, tz: null, maxPerMinute: null, minSeverity: null };
   const money = "\\$\\s?(\\d+(?:\\.\\d+)?)";
   for (const s of t.split(/(?<=[.!;\n])\s+/)) {
     let m: RegExpMatchArray | null;
@@ -132,6 +135,7 @@ export function offlineDraft(text: string): DraftT {
       rules.push({ ...blank, kind: "categories", categories: m[1]!.match(/data|inference|compute|other/g) as any, sourcePhrase: m[0] });
     }
     if ((m = s.match(/more than (\d+) (?:payments|purchases|times) (?:a|per) minute/))) rules.push({ ...blank, kind: "rateLimit", maxPerMinute: Number(m[1]), sourcePhrase: m[0] });
+    if ((m = s.match(/(?:hold|flag|text me about|ask me about|check with me (?:on|about))[^.]*?\b(?:anything |activity that looks |spending that looks )?(?:unusual|anomalous|out of character)/))) rules.push({ ...blank, kind: "anomalyGuard", minSeverity: "high", sourcePhrase: m[0] });
     if ((m = s.match(/(?:between|from) (\d{1,2})\s*(am|pm)? (?:and|to|-|–) (\d{1,2})\s*(am|pm)/))) {
       const h = (n: number, ap?: string) => (ap === "pm" && n < 12 ? n + 12 : ap === "am" && n === 12 ? 0 : n);
       rules.push({ ...blank, kind: "timeWindow", startHour: h(Number(m[1]), m[2] ?? m[4]), endHour: h(Number(m[3]), m[4]), days: [], tz: "America/Chicago", sourcePhrase: m[0] });

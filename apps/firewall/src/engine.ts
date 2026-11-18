@@ -11,6 +11,7 @@ import {
   type SpendState,
 } from "@agent-firewall/policy";
 import { ensureAgent, immediate, SPENDING_SQL, type DB } from "./db";
+import { anomalyConfig, detectAnomalies, type AnomalyConfig } from "./anomaly";
 
 export interface ActivePolicy {
   id: string;
@@ -77,7 +78,7 @@ export function parsePaymentRequest(body: any): PaymentRequest {
  * two $0.80 requests against $1.00 of budget serialize on BEGIN IMMEDIATE, so the
  * second one sees the first one's reservation and is blocked.
  */
-export function evaluateAndReserve(db: DB, req: PaymentRequest, opts: { now?: Date; holdMinutes?: number; devMode?: boolean } = {}): EvaluateResult {
+export function evaluateAndReserve(db: DB, req: PaymentRequest, opts: { now?: Date; holdMinutes?: number; devMode?: boolean; anomaly?: AnomalyConfig } = {}): EvaluateResult {
   const now = opts.now ?? new Date();
   ensureAgent(db, req.agentId);
   return immediate(db, () => {
@@ -93,6 +94,7 @@ export function evaluateAndReserve(db: DB, req: PaymentRequest, opts: { now?: Da
           violations: JSON.parse(existing.violations_json),
           triggerPause: false,
           flags: JSON.parse(existing.flags_json),
+          anomalies: JSON.parse(existing.anomalies_json ?? "[]"),
           at: existing.created_at,
         },
         policyHash: existing.policy_hash,
@@ -104,9 +106,11 @@ export function evaluateAndReserve(db: DB, req: PaymentRequest, opts: { now?: Da
     // No policy = deny by default. An agent with no rules can't spend.
     const rules: Rule[] = policy ? policy.rules : [];
     const state = spendState(db, req.agentId, req.taskId, now);
+    // Same transaction, before this request's row exists: it never counts in its own baseline.
+    const anomalies = detectAnomalies(db, req, rules, state, now, opts.anomaly ?? anomalyConfig);
     let decision: Decision = policy
-      ? evaluate(rules, req, state, { now })
-      : { requestId: req.requestId, outcome: "block", ruleId: "no-policy", reason: "No rules saved yet. Set rules before the agent can spend.", violations: [], triggerPause: false, flags: [], at: now.toISOString() };
+      ? evaluate(rules, req, { ...state, anomalies }, { now })
+      : { requestId: req.requestId, outcome: "block", ruleId: "no-policy", reason: "No rules saved yet. Set rules before the agent can spend.", violations: [], triggerPause: false, flags: [], anomalies, at: now.toISOString() };
 
     if (decision.triggerPause) {
       db.prepare("UPDATE agents SET status='paused', paused_reason=? WHERE id=?").run(decision.reason, req.agentId);
@@ -114,12 +118,12 @@ export function evaluateAndReserve(db: DB, req: PaymentRequest, opts: { now?: Da
 
     const status = decision.outcome === "allow" ? "reserved" : decision.outcome === "hold" ? "held" : "blocked";
     db.prepare(
-      `INSERT INTO requests (request_id, agent_id, task_id, recipient, amount_micro, category, purpose, source_context, outcome, status, rule_id, reason, flags_json, violations_json, policy_hash, created_at, created_ms)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO requests (request_id, agent_id, task_id, recipient, amount_micro, category, purpose, source_context, outcome, status, rule_id, reason, flags_json, violations_json, policy_hash, created_at, created_ms, anomalies_json)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     ).run(
       req.requestId, req.agentId, req.taskId, req.recipient, req.amountMicro, req.category, req.purpose, req.sourceContext ?? null,
       decision.outcome, status, decision.ruleId ?? null, decision.reason, JSON.stringify(decision.flags), JSON.stringify(decision.violations),
-      policy?.hash ?? null, now.toISOString(), now.getTime(),
+      policy?.hash ?? null, now.toISOString(), now.getTime(), JSON.stringify(decision.anomalies),
     );
     db.prepare("UPDATE agents SET current_task=? WHERE id=?").run(req.taskId, req.agentId);
 
@@ -137,16 +141,22 @@ export function evaluateAndReserve(db: DB, req: PaymentRequest, opts: { now?: Da
   });
 }
 
-/** Agent reports the payment went through. */
+/**
+ * Agent (local-key) or payer.ts (circle-agent-wallet) reports the payment went through.
+ * Under MOCK_PAYMENTS=1 the sellers accept any payment header, so nothing moved: the row is marked simulated.
+ */
 export function markSettled(db: DB, requestId: string, txHash?: string): boolean {
-  const r = db.prepare("UPDATE requests SET status='settled', settled_tx=COALESCE(?, settled_tx) WHERE request_id=? AND status='reserved'").run(txHash ?? null, requestId);
+  const simulated = process.env.MOCK_PAYMENTS === "1" ? 1 : 0;
+  const r = db
+    .prepare("UPDATE requests SET status='settled', settled_tx=COALESCE(?, settled_tx), simulated=? WHERE request_id=? AND status='reserved'")
+    .run(txHash ?? null, simulated, requestId);
   return r.changes > 0;
 }
 
 /**
  * Agent reports the payment failed. If the firewall never signed it, give the budget back.
- * If it DID sign, the seller holds a valid authorization (up to ~9 days) and could still settle it,
- * so it stays counted as "unconfirmed" until that authorization expires (fail closed: never overspend).
+ * If it DID sign, the seller holds a valid authorization and may already have settled it, so it stays counted as
+ * "unconfirmed" until the owner reconciles it (fail closed: never overspend).
  */
 export function markFailed(db: DB, requestId: string, failureReason?: string): boolean {
   const r = db
@@ -155,9 +165,62 @@ export function markFailed(db: DB, requestId: string, failureReason?: string): b
   return r.changes > 0;
 }
 
-/** Release "unconfirmed" spend once its signed authorization can no longer be settled. */
-export function releaseExpiredUnconfirmed(db: DB, now = Date.now(), maxValidityMs = 9 * 24 * 3600_000): number {
-  return Number(db.prepare("UPDATE requests SET status='released' WHERE status='unconfirmed' AND signed_ms < ?").run(now - maxValidityMs).changes);
+/**
+ * Reservation timeout. An allowed payment that was never signed or paid (signed_ms IS NULL) and is older than ttlMs
+ * gives its budget back: no money can have moved. A row with signed_ms set is NEVER released here, however old: it may
+ * have been submitted or accepted, so it waits for an outcome report or owner reconciliation.
+ *
+ * `inFlight` = request ids a /pay call is working on right now. payWithCircle reads status='reserved', awaits the
+ * seller's 402 probe, and only then claims signed_ms, so without this guard a release during that probe could be
+ * followed by a payment the budget no longer counts. (/sign claims synchronously after its status check, so it has
+ * no such window.) The guard is in-process: it relies on the firewall being one process. The claim in payer.ts also
+ * requiring status='reserved' would make it hold across processes too.
+ */
+export function releaseStaleReservations(db: DB, opts: { now?: number; ttlMs: number; inFlight?: ReadonlySet<string> }): string[] {
+  const now = opts.now ?? Date.now();
+  const stale = db
+    .prepare("SELECT request_id FROM requests WHERE status='reserved' AND signed_ms IS NULL AND created_ms < ?")
+    .all(now - opts.ttlMs) as { request_id: string }[];
+  const release = db.prepare(
+    "UPDATE requests SET status='released', failure_reason=? WHERE request_id=? AND status='reserved' AND signed_ms IS NULL",
+  );
+  const reason = `Reservation expired unused after ${Math.round(opts.ttlMs / 60_000)} min (never signed or paid).`;
+  const released: string[] = [];
+  for (const { request_id } of stale) {
+    if (opts.inFlight?.has(request_id)) continue;
+    if (release.run(reason, request_id).changes > 0) released.push(request_id);
+  }
+  return released;
+}
+
+export type ReconcileOutcome = "paid" | "not_paid";
+export class ReconcileError extends Error {}
+
+/**
+ * Owner resolves a payment whose outcome the firewall can't know: "unconfirmed", or signed but never reported.
+ *   paid      → settled (counts, as before), with the owner's transaction reference if given
+ *   not_paid  → released (budget returned). Only the owner can assert this, after checking the payer's history.
+ * Unsigned reservations aren't uncertain (the timeout handles them) and settled/approved rows are already resolved.
+ */
+export function reconcilePayment(db: DB, requestId: string, outcome: ReconcileOutcome, opts: { txHash?: string; note?: string; now?: number; inFlight?: ReadonlySet<string> } = {}) {
+  const now = opts.now ?? Date.now();
+  // A payment still being made has no outcome yet; "not paid" now could release budget for money about to move.
+  if (opts.inFlight?.has(requestId)) throw new ReconcileError("This payment is still being made. Try again once it finishes.");
+  return immediate(db, () => {
+    const row = db.prepare("SELECT status, signed_ms FROM requests WHERE request_id=?").get(requestId) as { status: string; signed_ms: number | null } | undefined;
+    if (!row) throw new ReconcileError("Unknown payment request.");
+    const uncertain = row.status === "unconfirmed" || (row.status === "reserved" && row.signed_ms !== null);
+    if (!uncertain) throw new ReconcileError(`This payment is ${row.status}${row.status === "reserved" ? " and was never signed" : ""}; there is nothing to reconcile.`);
+    const note = opts.note?.trim().slice(0, 200) || null;
+    if (outcome === "paid") {
+      db.prepare("UPDATE requests SET status='settled', settled_tx=COALESCE(?, settled_tx), reconciled_ms=?, failure_reason=COALESCE(?, failure_reason) WHERE request_id=?")
+        .run(opts.txHash ?? null, now, note && `Owner reconciled as paid: ${note}`, requestId);
+    } else {
+      db.prepare("UPDATE requests SET status='released', reconciled_ms=?, failure_reason=? WHERE request_id=?")
+        .run(now, `Owner reconciled as not paid${note ? `: ${note}` : "."}`, requestId);
+    }
+    return { status: outcome === "paid" ? "settled" : "released" };
+  });
 }
 
 export function savePolicy(db: DB, agentId: string, rules: Rule[], hash: string): ActivePolicy {

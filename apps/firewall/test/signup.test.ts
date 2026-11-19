@@ -48,3 +48,15 @@ describe("agent keys issued from the website", () => {
     expect(JSON.stringify(list.json)).not.toContain(rotated.json.key);
   });
 });
+
+describe("text-message settings on their own", () => {
+  it("owner saves phone + events without a rules save; validates; agents can't", async () => {
+    const r = await call("POST", "/v1/agents/web-agent/notify", OWNER, { phone: "+16045550100", events: ["hold", "paused", "bogus"] });
+    expect(r.status).toBe(200);
+    expect(r.json.notify).toEqual({ phone: "+16045550100", events: ["hold", "paused"] });
+    expect(db.prepare("SELECT COUNT(*) n FROM policies WHERE agent_id='web-agent'").get()).toMatchObject({ n: 0 });
+    expect((await call("POST", "/v1/agents/web-agent/notify", OWNER, { phone: "604-555-0100" })).status).toBe(400);
+    expect((await call("POST", "/v1/agents/web-agent/notify", ALICE, { phone: "+16045550100" })).status).toBe(403);
+    expect((await call("POST", "/v1/agents/ghost/notify", OWNER, { phone: "+16045550100" })).status).toBe(404);
+  });
+});

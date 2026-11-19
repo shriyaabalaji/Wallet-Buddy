@@ -256,6 +256,17 @@ route("POST", "/v1/agents/:agentId/key", "owner", ({ db, params }) => {
   return { agentId, key: issueAgentKey(db, agentId), note: "Copy this key now; it won't be shown again. The previous key no longer works." };
 });
 
+// Owner text-message settings on their own (no rules save, so no Arc re-commit).
+route("POST", "/v1/agents/:agentId/notify", "owner", ({ db, params, body }) => {
+  const agentId = params.agentId!;
+  requireAgent(db, agentId);
+  const raw = typeof body?.phone === "string" ? body.phone.trim() : "";
+  if (raw && !/^\+[1-9]\d{7,14}$/.test(raw)) throw new HttpError(400, "Phone must be in international format, like +16045550100.");
+  const events = Array.isArray(body?.events) ? [...new Set(body.events.filter((e: unknown) => ["hold", "budget80", "paused"].includes(e as string)))] : ["hold"];
+  db.prepare("INSERT OR REPLACE INTO notify (agent_id, phone, events_json) VALUES (?,?,?)").run(agentId, raw || null, JSON.stringify(events));
+  return { agentId, notify: { phone: raw || null, events } };
+});
+
 route("POST", "/v1/agents/:agentId/pause", "owner", async ({ db, params, body }) => {
   requireAgent(db, params.agentId!);
   setPaused(db, params.agentId!, true, typeof body?.reason === "string" ? body.reason : undefined);

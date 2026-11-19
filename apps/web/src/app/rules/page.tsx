@@ -290,8 +290,7 @@ const EVENTS = Object.keys(EVENT_LABEL) as NotifyEvent[];
 const DEFAULT_EVENTS: NotifyEvent[] = ["hold"];
 
 /**
- * Owner text-message settings. The firewall has no notify-only route: settings are written by POST /v1/policy,
- * so this re-sends the rules currently in force (re-read just before saving, unchanged) alongside them.
+ * Owner text-message settings, saved on their own (POST /v1/agents/:id/notify): no rules save, no Arc re-commit.
  */
 function TextMessages({ agentId, saved, refresh, twilio, arcLive }: {
   agentId: string;
@@ -318,7 +317,6 @@ function TextMessages({ agentId, saved, refresh, twilio, arcLive }: {
     setLoaded(true);
   }, [saved, loaded]);
 
-  const hasRules = Boolean(saved?.policy);
   const toggle = (e: NotifyEvent, on: boolean) => {
     setDone(null);
     setEvents((cur) => (on ? (cur.includes(e) ? cur : [...cur, e]) : cur.filter((x) => x !== e)));
@@ -330,12 +328,9 @@ function TextMessages({ agentId, saved, refresh, twilio, arcLive }: {
     if (!normalized) { setPhoneErr("Include the country code, like +1 604 555 0100."); return; }
     setPhoneErr(null); setBusy(true);
     try {
-      // Re-read the rules right before saving so a stale page can't roll back rules changed elsewhere.
-      const fresh = await api<SavedPolicy>(`/v1/policy/${encodeURIComponent(agentId)}`);
-      if (!fresh.policy) throw new ApiError("Save rules for this agent first, then add your number.", 409);
-      await api("/v1/policy", {
+      await api(`/v1/agents/${encodeURIComponent(agentId)}/notify`, {
         method: "POST",
-        body: { agentId, rules: fresh.policy.rules, confirmed: true, notify: { phone: normalized, events: EVENTS.filter((e) => events.includes(e)) } },
+        body: { phone: normalized, events: EVENTS.filter((e) => events.includes(e)) },
       });
       setPhone(formatPhone(normalized));
       setDone(events.length ? `Saved. Texts go to ${formatPhone(normalized)}.` : "Saved. No texts will be sent.");
@@ -364,12 +359,11 @@ function TextMessages({ agentId, saved, refresh, twilio, arcLive }: {
         ))}
       </fieldset>
       <div className="toolbar sms-actions">
-        <button className="btn" onClick={save} disabled={busy || !hasRules || !phone.trim()}>{busy ? "Saving…" : "Save"}</button>
+        <button className="btn" onClick={save} disabled={busy || !phone.trim()}>{busy ? "Saving…" : "Save"}</button>
         {done ? <span className="saved-note" role="status"><Icon name="check" size={16} />{done}</span>
-          : arcLive && hasRules ? <span className="muted small">Also re-locks your unchanged rules on Arc (about 1¢).</span> : null}
+          : null}
       </div>
       {error && <ErrorState error={error} />}
-      {saved && !hasRules && <p className="muted small">Save rules for this agent first, then add your number.</p>}
       <p className="muted small">
         Approving a held payment still needs your passkey. Reply NO to a text to cancel that payment, or PAUSE to stop your agent.
         {twilio === false && <><br />Texting isn&apos;t set up on the firewall yet, so texts go to its log instead of your phone.</>}

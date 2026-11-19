@@ -13,6 +13,7 @@
     "dev:web": "npm run dev -w @agent-firewall/web",
     "dev:sellers": "npm run dev -w @agent-firewall/sellers",
     "test:contracts": "cd contracts && forge test",
+    "demo": "scripts/demo.sh",
     "demo:local": "scripts/demo-local.sh",
     "smoke": "scripts/smoke.sh",
     "dev:agent": "npm start -w @agent-firewall/agent --",

@@ -145,6 +145,8 @@ function activityItem(r: any) {
     anomalies: JSON.parse(r.anomalies_json ?? "[]"),
     arcTx: r.hold_tx ?? r.arc_tx ?? null,
     arcTxUrl: explorerTx(r.hold_tx ?? r.arc_tx),
+    decisionLogTx: r.arc_tx ?? null,
+    decisionLogTxUrl: explorerTx(r.arc_tx),
     resolveTx: r.resolve_tx ?? null,
     resolveTxUrl: explorerTx(r.resolve_tx),
     // How much is actually known about the money (simulated, no reference, unverified reference, confirmed). Additive.
@@ -354,7 +356,7 @@ route("POST", "/v1/payments/evaluate", "agent", async ({ db, body, who }) => {
   // Prompt injection: does this request follow a seller response that carried payment instructions? The flag is
   // logged with the decision and texted to the owner; the rules above have already decided (it never loosens them).
   if (!res.duplicate) {
-    const flag = injectionFlag(db, req.agentId, req.recipient);
+    const flag = injectionFlag(db, req.agentId, req.recipient, req.taskId);
     if (flag) {
       res.decision.flags = [...(res.decision.flags ?? []), flag];
       db.prepare("UPDATE requests SET flags_json=? WHERE request_id=?").run(JSON.stringify(res.decision.flags), req.requestId);
@@ -403,6 +405,12 @@ route("GET", "/v1/optimizer/recommendations", "owner", ({ db, query }) => listRe
 // Onchain proof: public by design. Everything here is already public on Arc, plus aggregate ledger counts (no
 // tokens, phones, purposes of other agents' payments beyond what the decision log already commits to).
 route("GET", "/v1/proof", "public", ({ db, query }) => proofView(db, Math.min(Number(query.get("limit") ?? 300) || 300, 1000)));
+// Owner: the last texts the firewall sent or would have sent (dry-run without Twilio). Phone numbers are masked.
+route("GET", "/v1/notifications", "owner", ({ db, query }) => ({
+  twilio: smsConfigured(),
+  items: (db.prepare("SELECT direction, phone, body, at FROM sms_log ORDER BY id DESC LIMIT ?").all(Math.min(Number(query.get("limit") ?? 10) || 10, 50)) as any[])
+    .map((r) => ({ ...r, phone: r.phone ? `…${String(r.phone).slice(-4)}` : null })),
+}));
 route("GET", "/v1/signer", "public", () => ({ address: payerAddress(), mode: paymentMode, network: PAY_NETWORK, arcNetwork: network }));
 /**
  * Request ids a /pay call is working on. payWithCircle awaits the seller probe before it claims signed_ms, so the

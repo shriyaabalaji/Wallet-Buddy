@@ -20,6 +20,7 @@ describe("scanner", () => {
     expect(f.address).toBe(ATTACKER);
     expect(f.amountUsdc).toBe(3);
     expect(f.markers.length).toBeGreaterThanOrEqual(2);
+    expect(f.excerpt).not.toMatch(/[{}]|","/);
   });
   it("ignores ordinary data", () => {
     expect(scanForPaymentInstruction(JSON.stringify({ injuries: [{ player: "A", status: "Out", detail: "Ankle; will not play Wednesday." }] }))).toBeNull();
@@ -67,6 +68,9 @@ describe("flagging", () => {
   });
   it("other agents aren't tainted, and the taint expires", () => {
     expect(injectionFlag(db, "race-agent", ATTACKER)).toBeNull();
-    expect(injectionFlag(db, "research-agent", ATTACKER, Date.now() + 31 * 60_000)).toBeNull();
+    expect(injectionFlag(db, "research-agent", ATTACKER, "t", Date.now() + 31 * 60_000)).toBeNull();
+    // A later purchase from a known seller in another task isn't flagged; the same task is.
+    expect(injectionFlag(db, "research-agent", "sportsfeed", "other-task")).toBeNull();
+    expect(injectionFlag(db, "research-agent", "sportsfeed", "t")).toMatch(/same task/);
   });
 });

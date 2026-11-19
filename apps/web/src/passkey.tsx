@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { startRegistration } from "@simplewebauthn/browser";
 import { api } from "@/lib/api";
+import { Icon } from "@/components";
 
 /** Owner passkey enrollment. Approving a held payment needs this passkey. */
 export function PasskeySetup() {
@@ -34,11 +35,15 @@ export function PasskeySetup() {
     <section className="panel" aria-labelledby="pk">
       <div className="panel-head">
         <h2 id="pk">Passkey</h2>
-        {ready !== null && <span className={`badge ${ready ? "ok" : "warn"}`}>{ready ? "Set up" : "Not set up"}</span>}
       </div>
-      <p className="muted">Approves held payments with Face ID, Touch ID or a security key.</p>
-      {!ready && <div><button className="btn secondary" onClick={enroll} disabled={busy}>{busy ? "Waiting for your device…" : "Set up passkey"}</button></div>}
-      {msg && <p className="small" role="status">{msg}</p>}
+      <div className="set-row">
+        <div className="set-label"><span>Approve held payments</span><span className="set-hint">Face ID, Touch ID or a security key</span></div>
+        <div className="set-ctl">
+          {ready ? <span className="saved-note"><Icon name="check" size={16} />Set up on this firewall</span>
+            : <div><button className="btn secondary" onClick={enroll} disabled={busy}>{busy ? "Waiting for your device…" : "Set up passkey"}</button></div>}
+          {msg && <p className="small" role="status">{msg}</p>}
+        </div>
+      </div>
     </section>
   );
 }

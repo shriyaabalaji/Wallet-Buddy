@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ARC_EXPLORER, ApiError, api, type NotifyEvent } from "@/lib/api";
 import { useAgents } from "@/lib/agents";
 import { usePoll } from "@/lib/hooks";
@@ -11,20 +11,77 @@ import { formatPhone, normalizePhone } from "./phone";
 
 /** Owner-wide settings: one phone for every agent, and the one wallet they all spend from. */
 export default function SettingsPage() {
+  const [active, go] = useActiveSection(SECTIONS.map((x) => x.id));
   return (
     <>
-      <h1>Settings</h1>
-      <div className="settings-split">
-        <div className="rules-col">
+      <h1 className="settings-title">Settings</h1>
+      <div className="settings-gh">
+        <nav className="settings-nav" aria-label="Settings sections">
+          {SECTIONS.map((x) => (
+            <a key={x.id} href={`#${x.id}`} onClick={(e) => { e.preventDefault(); go(x.id); }} className={active === x.id ? "on" : ""} aria-current={active === x.id ? "true" : undefined}>
+              <Icon name={x.icon} size={16} />{x.label}
+            </a>
+          ))}
+        </nav>
+        <div className="settings-body">
+          <Wallet />
+          <AddMoney />
           <TextMessages />
           <PasskeySetup />
         </div>
-        <div className="rules-col">
-          <Wallet />
-          <AddMoney />
-        </div>
       </div>
     </>
+  );
+}
+
+const SECTIONS = [
+  { id: "wallet", label: "Wallet", icon: "wallet" },
+  { id: "add-money", label: "Add money", icon: "plus" },
+  { id: "sms", label: "Text messages", icon: "bolt" },
+  { id: "pk", label: "Passkey", icon: "lock" },
+];
+
+/**
+ * Which section the menu highlights: the one you clicked (until you scroll yourself), otherwise the last heading
+ * scrolled past. The page is too short for the last sections to reach the top, so a click must win over position.
+ */
+function useActiveSection(ids: string[]) {
+  const [active, setActive] = useState(ids[0]!);
+  const pinned = useRef<string | null>(null);
+  useEffect(() => {
+    const onScroll = () => {
+      if (pinned.current) return;
+      let cur = ids[0]!;
+      for (const id of ids) { const el = document.getElementById(id); if (el && el.getBoundingClientRect().top < 200) cur = id; }
+      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) cur = ids[ids.length - 1]!;
+      setActive(cur);
+    };
+    const unpin = () => { pinned.current = null; };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    for (const ev of ["wheel", "touchmove", "keydown"]) window.addEventListener(ev, unpin, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      for (const ev of ["wheel", "touchmove", "keydown"]) window.removeEventListener(ev, unpin);
+    };
+  }, [ids.join()]); // eslint-disable-line react-hooks/exhaustive-deps
+  const go = (id: string) => {
+    pinned.current = id;
+    setActive(id);
+    const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    document.getElementById(id)?.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
+    history.replaceState(null, "", `#${id}`);
+  };
+  return [active, go] as const;
+}
+
+/** One settings row: a label (and optional hint) on the left, the control on the right. */
+function Row({ label, hint, htmlFor, children }: { label: string; hint?: string; htmlFor?: string; children: React.ReactNode }) {
+  return (
+    <div className="set-row">
+      <div className="set-label">{htmlFor ? <label htmlFor={htmlFor}>{label}</label> : <span>{label}</span>}{hint && <span className="set-hint">{hint}</span>}</div>
+      <div className="set-ctl">{children}</div>
+    </div>
   );
 }
 
@@ -76,55 +133,56 @@ function TextMessages() {
     } finally { setBusy(false); }
   }
 
-  const provider = cur.data?.sms ?? (cur.data?.twilio ? "twilio" : cur.data ? "dry-run" : null);
   return (
     <section className="panel" aria-labelledby="sms">
       <div className="panel-head">
         <h2 id="sms">Text messages</h2>
-        {provider && (provider === "dry-run"
-          ? <span className="badge warn" title="No SMS provider is set on the firewall, so texts go to its log.">Not sending</span>
-          : <span className="badge ok" title={provider === "textbelt" ? "Sent with Textbelt" : "Sent with Twilio"}>On</span>)}
       </div>
       {cur.error && !cur.data && <ErrorState error={cur.error} onRetry={cur.refresh} />}
-      <div className="field">
-        <label htmlFor="phone">Phone</label>
+      <Row label="Phone" hint="One number for every agent" htmlFor="phone">
         <input
           id="phone" type="tel" autoComplete="tel" inputMode="tel" placeholder="+1 604 555 0100"
           value={phone} onChange={(e) => { setPhone(e.target.value); setPhoneErr(null); setDone(null); }}
           aria-invalid={phoneErr ? true : undefined} aria-describedby={phoneErr ? "phone-err" : undefined}
         />
         {phoneErr && <p id="phone-err" role="alert" className="field-err">{phoneErr}</p>}
-      </div>
-      <fieldset className="chip-set">
-        <legend>Text me when</legend>
-        <div className="chips">
+      </Row>
+      <Row label="Text me when">
+        <div className="chips" role="group" aria-label="Text me when">
           {EVENTS.map((e) => (
             <label key={e} className="chip-toggle"><input type="checkbox" checked={events.includes(e)} onChange={(ev) => toggle(e, ev.target.checked)} /><span>{EVENT_LABEL[e]}</span></label>
           ))}
         </div>
-      </fieldset>
-      <div className="switch-row">
-        <label className="switch" htmlFor="text-ok">
-          <span>Approve by text</span>
-          <input id="text-ok" type="checkbox" role="switch" checked={textOk} onChange={(e) => { setTextOk(e.target.checked); setDone(null); }} />
-          <span className="track" aria-hidden="true" />
-        </label>
-        {textOk && (
-          <span className="cap" title="Bigger payments need your passkey">
-            <label htmlFor="cap">up to $</label>
-            <input id="cap" type="number" min={0} max={100} step={0.5} value={capUsd} onChange={(e) => { setCapUsd(e.target.value); setDone(null); }} />
-            <span>each</span>
-          </span>
-        )}
-      </div>
-      <div className="replies" aria-label="Replies you can text back">
-        {textOk && <span><code>YES 123456</code>approve</span>}
-        <span><code>NO</code>cancel</span>
-        <span><code>PAUSE</code>stop all agents</span>
-      </div>
-      <div className="toolbar sms-actions">
-        <button className="btn" onClick={save} disabled={busy || !loaded || !phone.trim()}>{busy ? "Saving…" : "Save"}</button>
-        {done && <span className="saved-note" role="status"><Icon name="check" size={16} />{done}</span>}
+      </Row>
+      <Row label="Approve by text" hint="Bigger payments need your passkey">
+        <div className="inline-ctl">
+          <label className="switch" htmlFor="text-ok">
+            <span className="sr">Approve by text</span>
+            <input id="text-ok" type="checkbox" role="switch" checked={textOk} onChange={(e) => { setTextOk(e.target.checked); setDone(null); }} />
+            <span className="track" aria-hidden="true" />
+          </label>
+          {textOk && (
+            <span className="cap">
+              <label htmlFor="cap">up to $</label>
+              <input id="cap" type="number" min={0} max={100} step={0.5} value={capUsd} onChange={(e) => { setCapUsd(e.target.value); setDone(null); }} />
+              <span>each</span>
+            </span>
+          )}
+        </div>
+      </Row>
+      <Row label="Reply with">
+        <div className="replies">
+          {textOk && <span><code>YES 123456</code>approve</span>}
+          <span><code>NO</code>cancel</span>
+          <span><code>PAUSE</code>stop all agents</span>
+        </div>
+      </Row>
+      <div className="set-row">
+        <div className="set-label" />
+        <div className="set-ctl toolbar sms-actions">
+          <button className="btn" onClick={save} disabled={busy || !loaded || !phone.trim()}>{busy ? "Saving…" : "Save"}</button>
+          {done && <span className="saved-note" role="status"><Icon name="check" size={16} />{done}</span>}
+        </div>
       </div>
       {error && <ErrorState error={error} />}
     </section>
@@ -146,22 +204,14 @@ function Wallet() {
     <section className="panel" aria-labelledby="wallet">
       <div className="panel-head">
         <h2 id="wallet">Wallet</h2>
-        {health && (
-          circle && addr
-            ? <span className="badge ok">Connected</span>
-            : <span className="badge warn">{circle ? "No wallet address" : "Local test key"}</span>
-        )}
       </div>
       {!health ? <p className="muted" role="status">Loading…</p> : (
         <>
-          <div className="wallet-balance">
-            {available !== null ? <Money micro={Math.floor(available * 100 + 1e-9) * 10_000} size="xl" /> : <span className="money md">{readError ? "Couldn't read it" : health.mockPayments ? "Simulated" : "Not set up"}</span>}
-            <span className="muted small">{circle ? "Circle Agent Wallet" : "Local key"}, Arc {health.network ?? "testnet"}</span>
-          </div>
-          <div className="facts">
-            <div className="kv"><span>Wallet</span>{addr ? <a className="mono" href={`${ARC_EXPLORER}/address/${addr}`} target="_blank" rel="noreferrer" title={addr}>{shortAddr(addr)}</a> : <span>Not set</span>}</div>
-            {depositor && depositor !== addr && <div className="kv"><span>Gateway account</span><a className="mono" href={`${ARC_EXPLORER}/address/${depositor}`} target="_blank" rel="noreferrer" title={depositor}>{shortAddr(depositor)}</a></div>}
-          </div>
+          <Row label="Balance" hint={`${circle ? "Circle Agent Wallet" : "Local key"}, Arc ${health.network ?? "testnet"}`}>
+            {available !== null ? <Money micro={Math.floor(available * 100 + 1e-9) * 10_000} size="lg" /> : <span>{readError ? "Couldn't read it" : health.mockPayments ? "Simulated" : "Not set up"}</span>}
+          </Row>
+          <Row label="Wallet address">{addr ? <a className="mono" href={`${ARC_EXPLORER}/address/${addr}`} target="_blank" rel="noreferrer" title={addr}>{shortAddr(addr)}</a> : <span>Not set</span>}</Row>
+          {depositor && depositor !== addr && <Row label="Gateway account" hint="Holds the balance agents spend"><a className="mono" href={`${ARC_EXPLORER}/address/${depositor}`} target="_blank" rel="noreferrer" title={depositor}>{shortAddr(depositor)}</a></Row>}
         </>
       )}
       <ConnectCircleWallet />

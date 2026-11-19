@@ -138,7 +138,6 @@ export function AddMoney() {
     <section className="panel" aria-labelledby="add-money">
       <div className="panel-head">
         <h2 id="add-money">Add money</h2>
-        {target && <span className={`badge ${mainnet ? "warn" : "muted"}`}>{mainnet ? "Arc mainnet · real USDC" : "Arc testnet"}</span>}
       </div>
 
       {!health ? <p className="muted" role="status">Loading…</p>

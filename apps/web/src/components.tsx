@@ -97,7 +97,7 @@ export function AnomalyTags({ anomalies }: { anomalies: AnomalySignal[] | undefi
   return (
     <span className="tags">
       {anomalies.map((a) => (
-        <span key={a.type} className={`pill ${a.severity === "low" ? "quiet" : "warn"}`} title={a.explanation}>{ANOMALY_LABEL[a.type]}{a.severity === "high" ? " · high" : ""}</span>
+        <span key={a.type} className={`pill ${a.severity === "low" ? "quiet" : "warn"}`} title={a.explanation}>{ANOMALY_LABEL[a.type]}{a.severity === "high" ? " (high)" : ""}</span>
       ))}
     </span>
   );
@@ -142,10 +142,10 @@ const SETTLEMENT_BADGE: Partial<Record<SettlementState, { label: string; tone: "
   awaiting_outcome: { label: "Sent, waiting", tone: "ok" },
   uncertain: { label: "Outcome unknown", tone: "warn" },
   simulated: { label: "Simulated", tone: "muted" },
-  accepted_no_reference: { label: "Paid · no reference", tone: "ok" },
-  accepted_with_reference: { label: "Paid · unverified ref", tone: "ok" },
+  accepted_no_reference: { label: "Paid", tone: "ok" },
+  accepted_with_reference: { label: "Paid, unverified", tone: "ok" },
   confirmed_onchain: { label: "Released on Arc", tone: "ok" },
-  approved_unrecorded: { label: "Approved · not on Arc", tone: "warn" },
+  approved_unrecorded: { label: "Approved, not on Arc", tone: "warn" },
 };
 export function OutcomeBadge({ outcome, status, settlement }: { outcome: Outcome; status?: string; settlement?: Settlement }) {
   // blue = allowed, orange = needs attention / blocked, grey = no real money. Text label always present (not color alone).

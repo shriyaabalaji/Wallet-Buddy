@@ -60,13 +60,13 @@ export function ProofMetrics({ m }: { m: Proof["metrics"] }) {
       <section aria-label="Metrics" className="proof-stats">
         <Stat label="Payments settled" value={String(m.paymentsSettled)} />
         <Stat label="Total spent" value={usd(m.totalSpentUsdc)} />
-        <Stat label="Decisions" value={`${m.decisions}`} sub={`${m.outcomes.allow} allowed · ${m.outcomes.block} blocked · ${m.outcomes.hold} held`} />
-        <Stat label="Holds" value={`${m.holds.approved + m.holds.denied + m.holds.expired + m.holds.held}`} sub={`${m.holds.approved} approved · ${m.holds.denied} denied · ${m.holds.expired} expired → refunded`} />
-        <Stat label="Decision latency" value={m.decisionLatencyMs.avg == null ? "—" : `${m.decisionLatencyMs.avg} ms`} sub={m.decisionLatencyMs.samples ? `avg of ${m.decisionLatencyMs.samples} · p95 ${m.decisionLatencyMs.p95} ms` : "no samples yet"} />
+        <Stat label="Decisions" value={`${m.decisions}`} sub={`${m.outcomes.allow} allowed, ${m.outcomes.block} blocked, ${m.outcomes.hold} held`} />
+        <Stat label="Holds" value={`${m.holds.approved + m.holds.denied + m.holds.expired + m.holds.held}`} sub={`${m.holds.approved} approved, ${m.holds.denied} denied, ${m.holds.expired} expired and refunded`} />
+        <Stat label="Decision latency" value={m.decisionLatencyMs.avg == null ? "—" : `${m.decisionLatencyMs.avg} ms`} sub={m.decisionLatencyMs.samples ? `avg of ${m.decisionLatencyMs.samples}, p95 ${m.decisionLatencyMs.p95} ms` : "no samples yet"} />
         <Stat label="Worst-case loss" value={`${usd(m.worstCaseLoss.perDayUsdc)}/day`} sub="if the agent or payer key is compromised" />
       </section>
       {m.blockedByRule.length > 0 && (
-        <p className="small muted">Blocked by rule: {m.blockedByRule.map((b) => `${b.rule} ${b.count}`).join(" · ")} · flagged as unusual: {m.flaggedRequests}. Metrics come from the firewall&apos;s ledger; the transactions below come from the chain.</p>
+        <p className="small muted">Blocked by rule: {m.blockedByRule.map((b) => `${b.rule} ${b.count}`).join(", ")}. Flagged as unusual: {m.flaggedRequests}. Metrics come from the firewall&apos;s ledger; the transactions below come from the chain.</p>
       )}
     </>
   );
@@ -121,12 +121,12 @@ function detail(t: Proof["transactions"][number]) {
   if (t.kind === "decision_log") {
     const c = { allow: 0, block: 0, hold: 0 } as Record<string, number>;
     for (const x of e) c[x.outcome ?? ""] = (c[x.outcome ?? ""] ?? 0) + 1;
-    return `${e.length} decision${e.length === 1 ? "" : "s"}: ${c.allow} allow · ${c.block} block · ${c.hold} hold`;
+    return `${e.length} decision${e.length === 1 ? "" : "s"}: ${c.allow} allow, ${c.block} block, ${c.hold} hold`;
   }
   if (t.kind === "policy_commit") return "Rule set hash committed";
   const x = e[0]!;
   const amt = x.amountUsdc != null ? usd(x.amountUsdc) : "";
-  if (t.kind === "vault_hold") return `${amt} escrowed${x.purpose ? ` · ${x.purpose}` : ""}`;
+  if (t.kind === "vault_hold") return `${amt} escrowed${x.purpose ? ` for ${x.purpose}` : ""}`;
   if (t.kind === "vault_release") return `${amt} released to seller after owner approval`;
   if (t.kind === "vault_refund") return `${amt} returned to treasury${x.expired ? " (expired)" : " (denied)"}`;
   if (t.kind === "gateway_deposit") return `${amt} deposited into Circle Gateway`;

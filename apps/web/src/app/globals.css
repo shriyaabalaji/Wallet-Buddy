@@ -272,9 +272,11 @@ td.detail { min-width: 260px; }
 .filter-bar { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: center; }
 .field.inline { flex-direction: row; align-items: center; gap: 8px; }
 .field.inline select { min-width: 180px; border-radius: 999px; }
-.filter-bar .filters { flex-wrap: wrap; border-radius: var(--r-in); }
+/* Status strip spans the full content width; cells stretch evenly and wrap into even rows when narrow. */
+.filter-bar .filters { flex: 1 1 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); border-radius: var(--r-in); }
+.filter-bar .filters .btn { width: 100%; padding: 0 12px; white-space: nowrap; }
+@media (max-width: 480px) { .filter-bar .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } .filter-bar .filters .btn { white-space: normal; } }
 table.activity { min-width: 820px; }
-table.activity td.detail { min-width: 220px; max-width: 320px; }
 table.activity .tags { flex-direction: column; align-items: flex-start; }
 .name-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .col .tip { white-space: normal; width: max-content; max-width: 180px; text-align: left; }

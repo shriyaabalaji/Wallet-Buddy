@@ -100,15 +100,15 @@ function Payments({ f, set }: { f: Filters; set: (patch: Partial<Filters>) => vo
     <>
       {!f.request && (
         <div className="filter-bar">
+          <div className="filters" role="group" aria-label="Status">
+            {STATUS.map((s) => <button key={s.id} className="btn secondary" aria-pressed={f.status === s.id} onClick={() => set({ status: s.id })}>{s.label}</button>)}
+          </div>
           <div className="field inline">
             <label htmlFor="f-agent" className="muted small">Agent</label>
             <select id="f-agent" value={f.agent} onChange={(e) => set({ agent: e.target.value })}>
               <option value="all">All agents</option>
               {agents.map((a) => <option key={a.id} value={a.id}>{displayName(a.name)}</option>)}
             </select>
-          </div>
-          <div className="filters" role="group" aria-label="Status">
-            {STATUS.map((s) => <button key={s.id} className="btn secondary" aria-pressed={f.status === s.id} onClick={() => set({ status: s.id })}>{s.label}</button>)}
           </div>
           <label className="check"><input type="checkbox" checked={f.flagged} onChange={(e) => set({ flagged: e.target.checked })} /> Unusual activity only</label>
         </div>
@@ -123,19 +123,19 @@ function Payments({ f, set }: { f: Filters; set: (patch: Partial<Filters>) => vo
         <div className="table-wrap">
           <table className={`activity ${allAgents ? "wide" : ""}`}>
             <thead>
-              <tr><th>Time</th><th>{allAgents ? "Agent · task" : "Task"}</th><th>Recipient · why</th><th>Amount</th><th>Decision · status</th><th>Arc</th><th>Unusual</th></tr>
+              <tr><th>Time</th><th>Agent</th><th>Recipient</th><th>Amount</th><th>Status</th><th>Arc</th><th>Unusual</th></tr>
             </thead>
             <tbody>
               {items.length === 0 && <tr><td colSpan={7} className="muted">Nothing matches these filters.</td></tr>}
               {items.map((a) => (
                 <tr key={a.requestId}>
                   <td className="mono nowrap"><button className="linkish mono" onClick={() => set({ request: a.requestId })} title="Open the full record">{shortTime(a.at)}</button></td>
-                  <td className="nowrap">{allAgents && <Link className="under" href={`/agents?id=${encodeURIComponent(a.agentId)}`}>{nameOf(a.agentId)}</Link>}<span className={`mono ${allAgents ? "muted small" : ""}`}>{a.taskId}</span></td>
-                  <td className="detail"><span className="mono under" title={a.recipient}>{shortAddr(a.recipient)}</span><span className="muted small under">{a.reason}</span>{a.flags.length > 0 && <span className="warn-text small under">{a.flags.join(" ")}</span>}</td>
+                  <td className="nowrap"><Link href={`/agents?id=${encodeURIComponent(a.agentId)}`}>{nameOf(a.agentId)}</Link></td>
+                  <td className="mono nowrap" title={a.recipient}>{shortAddr(a.recipient)}</td>
                   <td className="mono nowrap">{formatUsd(a.amountMicro)}</td>
-                  <td className="nowrap"><OutcomeBadge outcome={a.outcome} status={a.status} settlement={a.settlement} /><span className="muted small under">{DECISION[a.outcome]}{a.ruleId ? ` · ${humanize(a.ruleId)}` : ""}</span></td>
+                  <td className="nowrap"><OutcomeBadge outcome={a.outcome} status={a.status} settlement={a.settlement} /></td>
                   <td><ArcLinks a={a} /></td>
-                  <td><AnomalyTags anomalies={a.anomalies} /></td>
+                  <td><Unusual a={a} /></td>
                 </tr>
               ))}
             </tbody>
@@ -143,6 +143,17 @@ function Payments({ f, set }: { f: Filters; set: (patch: Partial<Filters>) => vo
         </div>
       )}
     </>
+  );
+}
+
+/** Anomaly tags plus an orange flag for possible prompt injection (the flag text itself is in the record). */
+function Unusual({ a }: { a: ActivityItem }) {
+  if (a.flags.length === 0) return <AnomalyTags anomalies={a.anomalies} />;
+  return (
+    <span className="tags">
+      <span className="pill warn" title={a.flags.join("\n")}>Possible injection</span>
+      {a.anomalies.length > 0 && <AnomalyTags anomalies={a.anomalies} />}
+    </span>
   );
 }
 
@@ -168,10 +179,11 @@ function Record({ a, agentName, onChange, onBack }: { a: ActivityItem; agentName
     ["Amount", <span className="mono">{formatUsd(a.amountMicro)}</span>],
     ["Category", a.category],
     ["Agent's stated purpose", a.purpose || "—"],
-    ["Decision", <>{DECISION[a.outcome]}{a.ruleId ? <span className="muted"> · rule {humanize(a.ruleId)}</span> : null}</>],
+    ["Decision", DECISION[a.outcome]],
+    ["Rule", a.ruleId ? humanize(a.ruleId) : "—"],
     ["Status", <OutcomeBadge outcome={a.outcome} status={a.status} settlement={a.settlement} />],
-    ...(a.settlement ? [["Money", <MoneyEvidence s={a.settlement} />] as [string, ReactNode]] : []),
-    ["Why", a.reason],
+    ...(a.settlement ? moneyRows(a.settlement) : []),
+    ["Why", a.reason || "—"],
     ["Request id", <span className="mono" style={{ overflowWrap: "anywhere" }}>{a.requestId}</span>],
   ];
   return (
@@ -189,7 +201,7 @@ function Record({ a, agentName, onChange, onBack }: { a: ActivityItem; agentName
               <li key={x.type}>
                 <div className="risk-head"><SeverityPill severity={x.severity} /><strong>{ANOMALY_LABEL[x.type]}</strong></div>
                 <p>{x.explanation}</p>
-                <p className="muted small mono">{Object.entries(x.measured).map(([k, v]) => `${k}=${v}`).join(" · ")}</p>
+                <p className="muted small mono">{Object.entries(x.measured).map(([k, v]) => <span key={k} className="under">{k}={String(v)}</span>)}</p>
               </li>
             ))}
           </ul>
@@ -202,14 +214,13 @@ function Record({ a, agentName, onChange, onBack }: { a: ActivityItem; agentName
   );
 }
 
-function MoneyEvidence({ s }: { s: NonNullable<ActivityItem["settlement"]> }) {
-  return (
-    <>
-      {s.label}
-      {s.reference && <span className="mono muted" style={{ overflowWrap: "anywhere" }}> · {s.verifiedOnchain ? "tx" : "reference (not verified)"} {s.reference}</span>}
-      {s.reconciledByOwner && <span className="muted"> · marked by you</span>}
-    </>
-  );
+/** What is known about the money, one fact per row; a missing reference is a plain dash. */
+function moneyRows(s: NonNullable<ActivityItem["settlement"]>): [string, ReactNode][] {
+  return [
+    ["Money", s.label],
+    [s.verifiedOnchain ? "Arc transaction" : s.reference ? "Reference (not verified)" : "Reference", s.reference ? <span className="mono" style={{ overflowWrap: "anywhere" }}>{s.reference}</span> : "—"],
+    ...(s.reconciledByOwner ? [["Reconciled", "Marked by you"] as [string, ReactNode]] : []),
+  ];
 }
 
 /**

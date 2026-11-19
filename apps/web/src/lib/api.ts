@@ -1,4 +1,5 @@
 import type { AnomalySignal, Rule } from "@agent-firewall/policy";
+import type { DepositInfo } from "./deposit";
 
 // The browser talks only to this dashboard's server-side proxy (app/api/fw), which holds the owner token.
 // Never call the firewall directly from the browser, and never put a firewall token in NEXT_PUBLIC_*.
@@ -102,6 +103,10 @@ export type Health = {
   /** Sellers accept any payment header: "paid" rows are simulated, no money moves. */
   mockPayments?: boolean;
   reservationTtlMinutes?: number;
+  /** Where an owner deposit from MetaMask goes (Settings → Add money); off under mock payments or without a payer. */
+  deposit?: DepositInfo;
+  /** The payer's Circle Gateway balance however it was funded (top-ups, MetaMask, CLI); null without a real payer. */
+  gateway?: { depositor: string; availableUsdc: number } | { depositor: string; error: string } | null;
 };
 
 export type HeldPayment = {

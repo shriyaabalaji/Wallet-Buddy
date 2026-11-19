@@ -9,6 +9,7 @@ import { idToBytes32 } from "@agent-firewall/policy";
 import { arcPublicClient } from "./arc";
 import { config, explorerTx } from "./config";
 import type { DB } from "./db";
+import { circleWallet } from "./wallet";
 
 const CHUNK = 4_000n;
 // One chunk at a time with a short pause: the public Arc RPC rate-limits ("Request exceeds defined limit"), and the
@@ -55,7 +56,8 @@ export function ensureProofTables(db: DB) {
 
 /** Who funds Gateway balances in this deployment (treasury, Circle wallet's backing EOA, local buyer). */
 function depositors(): Hex[] {
-  const xs = [process.env.TREASURY_ADDRESS, process.env.CIRCLE_GATEWAY_DEPOSITOR, process.env.CIRCLE_AGENT_WALLET_ADDRESS];
+  const w = circleWallet();
+  const xs = [process.env.TREASURY_ADDRESS, w.depositor ?? undefined, w.address ?? undefined];
   return [...new Set(xs.filter((x): x is string => Boolean(x && isAddress(x))).map((x) => getAddress(x)))];
 }
 
@@ -196,7 +198,7 @@ export function proofView(db: DB, limit = 300) {
     network: "Arc testnet (chain 5042002)",
     explorer: config.arc.explorerUrl,
     contracts: { policyRegistry: addr(config.arc.registryAddress), approvalVault: addr(config.arc.vaultAddress), usdc: addr(USDC), gatewayWallet: addr(GATEWAY_WALLETS[0]) },
-    wallets: { circleAgentWallet: addr(process.env.CIRCLE_AGENT_WALLET_ADDRESS), gatewayDepositor: addr(process.env.CIRCLE_GATEWAY_DEPOSITOR), treasury: addr(process.env.TREASURY_ADDRESS) },
+    wallets: { circleAgentWallet: addr(circleWallet().address), gatewayDepositor: addr(circleWallet().depositor), treasury: addr(process.env.TREASURY_ADDRESS) },
     indexedThroughBlock: cursor?.block ?? null,
     onchainCounts: Object.fromEntries(counts.map((c) => [c.kind, { txs: c.txs, events: c.events }])),
     transactions: [...byTx.values()],

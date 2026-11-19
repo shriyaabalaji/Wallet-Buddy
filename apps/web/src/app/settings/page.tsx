@@ -5,6 +5,8 @@ import { useAgents } from "@/lib/agents";
 import { usePoll } from "@/lib/hooks";
 import { ErrorState, Icon, cents, shortAddr } from "@/components";
 import { PasskeySetup } from "@/passkey";
+import { AddMoney } from "@/deposit";
+import { ConnectCircleWallet } from "@/connect-wallet";
 import { formatPhone, normalizePhone } from "./phone";
 
 /** Owner-wide settings: one phone for every agent, and the one wallet they all spend from. */
@@ -19,6 +21,7 @@ export default function SettingsPage() {
         </div>
         <div className="rules-col">
           <Wallet />
+          <AddMoney />
         </div>
       </div>
     </>
@@ -106,6 +109,10 @@ function Wallet() {
   const { health } = useAgents();
   const buyer = health?.buyer;
   const live = buyer && "gatewayAvailableUsdc" in buyer ? buyer : null;
+  const gw = health?.gateway && "availableUsdc" in health.gateway ? health.gateway : null;
+  const available = live?.gatewayAvailableUsdc ?? gw?.availableUsdc ?? null;
+  const depositor = live?.payer ?? gw?.depositor ?? null;
+  const readError = (buyer && "error" in buyer) || (health?.gateway && "error" in health.gateway);
   const circle = health?.paymentMode === "circle-agent-wallet";
   const addr = health?.signer ?? null;
   return (
@@ -123,21 +130,11 @@ function Wallet() {
           <div className="kv"><span>Address</span>{addr ? <a className="mono" href={`${ARC_EXPLORER}/address/${addr}`} target="_blank" rel="noreferrer" title={addr}>{shortAddr(addr)}</a> : <span>Not set</span>}</div>
           <div className="kv"><span>Pays with</span><span>{circle ? "Circle Agent Wallet" : "Local key (testnet only)"}</span></div>
           <div className="kv"><span>Network</span><span>Arc {health.network ?? "testnet"}</span></div>
-          <div className="kv"><span>Gateway balance</span><span>{live ? `${cents(live.gatewayAvailableUsdc)} USDC` : buyer && "error" in buyer ? "Couldn't read it" : "Not set up"}</span></div>
-          {live && live.payer !== addr && <div className="kv"><span>Gateway depositor</span><a className="mono" href={`${ARC_EXPLORER}/address/${live.payer}`} target="_blank" rel="noreferrer" title={live.payer}>{shortAddr(live.payer)}</a></div>}
+          <div className="kv"><span>Gateway balance</span><span>{available !== null ? `${cents(available)} USDC` : readError ? "Couldn't read it" : health.mockPayments ? "Simulated" : "Not set up"}</span></div>
+          {depositor && depositor !== addr && <div className="kv"><span>Gateway depositor</span><a className="mono" href={`${ARC_EXPLORER}/address/${depositor}`} target="_blank" rel="noreferrer" title={depositor}>{shortAddr(depositor)}</a></div>}
         </div>
       )}
-      <div className="steps">
-        <h3 className="small-h">{circle && addr ? "Connect a different wallet" : "Connect your Circle Agent Wallet"}</h3>
-        <p className="small muted">This runs on the machine that hosts the firewall: Circle&apos;s CLI signs in with a code sent to your email, which a browser can&apos;t do for you.</p>
-        <ol>
-          <li>Install Circle&apos;s CLI: <code>npm i -g @circle-fin/cli@1.4.0</code></li>
-          <li>Sign in: <code>circle wallet login &lt;email&gt; --testnet</code></li>
-          <li>Find the wallet: <code>circle wallet list --type agent --chain ARC-TESTNET</code>, then set <code>CIRCLE_AGENT_WALLET_ADDRESS</code> in <code>.env.firewall</code></li>
-          <li>Find its Gateway depositor: <code>circle gateway balance --address &lt;wallet&gt; --chain ARC-TESTNET --output json</code>, then set <code>backingEOA</code> as <code>CIRCLE_GATEWAY_DEPOSITOR</code></li>
-          <li>Restart the firewall.</li>
-        </ol>
-      </div>
+      <ConnectCircleWallet />
     </section>
   );
 }

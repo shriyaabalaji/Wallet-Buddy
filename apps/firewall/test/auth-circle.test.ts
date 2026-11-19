@@ -1,5 +1,5 @@
 // Authorization in circle-agent-wallet mode (the default payer): the firewall pays and records the outcome itself,
-// so an agent may not report /settled or /failed. Separate file because paymentMode is fixed at import.
+// so an agent may not report /settled or /failed. Separate file because the environment payment mode is read at import.
 import { randomBytes } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -69,7 +69,7 @@ const evaluate = (requestId: string) =>
 const row = (id: string) => db.prepare("SELECT status, signed_ms FROM requests WHERE request_id=?").get(id) as { status: string; signed_ms: number | null };
 
 describe("circle-agent-wallet mode", () => {
-  it("runs in circle-agent-wallet mode", () => expect(paymentMode).toBe("circle-agent-wallet"));
+  it("runs in circle-agent-wallet mode", () => expect(paymentMode()).toBe("circle-agent-wallet"));
 
   it("an agent can't release its reservation while /pay is in flight (spend stays counted)", async () => {
     const id = `req_race_${Date.now()}`;

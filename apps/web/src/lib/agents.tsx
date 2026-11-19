@@ -12,13 +12,15 @@ type Ctx = {
   agentsError: ApiError | null;
   refreshAgents: () => Promise<void>;
   health: Health | null;
+  /** Re-read /health now (e.g. after connecting a wallet) instead of waiting for the next poll. */
+  refreshHealth: () => Promise<void>;
 };
 const AgentContext = createContext<Ctx | null>(null);
 
 export function AgentProvider({ enabled, children }: { enabled: boolean; children: ReactNode }) {
   const { data, error, refresh } = usePoll(() => (enabled ? api<{ agents: AgentListItem[] }>("/v1/agents") : Promise.resolve(null)), 5000, enabled ? "on" : "off");
-  const { data: health } = usePoll(() => (enabled ? api<Health>("/health") : Promise.resolve(null)), 15000, enabled ? "on" : "off");
-  const value: Ctx = { agents: data?.agents ?? null, agentsError: error, refreshAgents: refresh, health: health ?? null };
+  const { data: health, refresh: refreshHealth } = usePoll(() => (enabled ? api<Health>("/health") : Promise.resolve(null)), 15000, enabled ? "on" : "off");
+  const value: Ctx = { agents: data?.agents ?? null, agentsError: error, refreshAgents: refresh, health: health ?? null, refreshHealth };
   return <AgentContext.Provider value={value}>{children}</AgentContext.Provider>;
 }
 

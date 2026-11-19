@@ -41,7 +41,8 @@ export function validTwilioSignature(signature: string | undefined, url: string,
 
 export function holdMessage(p: { agentName: string; amountMicro: number; recipient: string; known: boolean; flags: string[]; minutes: number; link: string }) {
   const who = p.known ? shortRecipient(p.recipient) : `an address you haven't approved (${shortRecipient(p.recipient)})`;
-  const flag = p.flags.some((f) => /injection/i.test(f)) ? " Requested right after a seller response: possible injection." : "";
+  const inj = p.flags.find((f) => /injection/i.test(f));
+  const flag = inj ? ` Possible prompt injection: ${inj.replace(/^PROMPT_INJECTION: this request /, "it ").slice(0, 160)}.` : "";
   return `Your ${p.agentName} wants to send ${formatUsd(p.amountMicro)} to ${who}.${flag} It's held safely and refunds in ${p.minutes} min if you do nothing. Reply NO to cancel it. To approve, open: ${p.link}`;
 }
 

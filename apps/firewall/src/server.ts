@@ -27,6 +27,7 @@ import { activityFilter, hourlySeries, listAgents, settlementOf, todayTotals } f
 import { CATEGORIES as OPT_CATEGORIES } from "@agent-firewall/policy";
 import { DEMO_PROVIDERS, fetchQuote, listRecommendations, optimizerResolve, recommend, saveRecommendation } from "./optimizer";
 import { proofView } from "./proof";
+import { injectionFlag } from "./injection";
 
 class HttpError extends Error {
   constructor(public status: number, message: string) {
@@ -350,6 +351,16 @@ route("POST", "/v1/payments/evaluate", "agent", async ({ db, body, who }) => {
   const before = spendState(db, req.agentId, req.taskId, new Date());
   const res = evaluateAndReserve(db, req, { holdMinutes: config.holdMinutes, devMode: config.devMode });
   if (!res.duplicate) db.prepare("UPDATE requests SET decision_ms=? WHERE request_id=? AND decision_ms IS NULL").run(Math.round((performance.now() - t0) * 100) / 100, req.requestId);
+  // Prompt injection: does this request follow a seller response that carried payment instructions? The flag is
+  // logged with the decision and texted to the owner; the rules above have already decided (it never loosens them).
+  if (!res.duplicate) {
+    const flag = injectionFlag(db, req.agentId, req.recipient);
+    if (flag) {
+      res.decision.flags = [...(res.decision.flags ?? []), flag];
+      db.prepare("UPDATE requests SET flags_json=? WHERE request_id=?").run(JSON.stringify(res.decision.flags), req.requestId);
+      if (res.decision.outcome === "block") void alertOwner(db, `Wallet Buddy blocked ${req.agentId}: ${formatUsd(req.amountMicro)} to ${shortRecipient(req.recipient)}. ${flag.replace(/^PROMPT_INJECTION: /, "Possible prompt injection: ")} Rule: ${res.decision.reason}`);
+    }
+  }
   // A replayed requestId returns the stored decision; don't hand another agent's decision back.
   if (res.duplicate) assertOwnsRequest(db, { kind: "agent", agentId: req.agentId }, req.requestId);
   if (!res.duplicate) {
@@ -522,6 +533,17 @@ route("POST", "/v1/twilio/inbound", "webhook", async ({ db, req, raw }) => {
 });
 
 // ---------- notifications ----------
+/** Security alerts go to the owner's phone whenever one is set (no opt-in needed). Dry-run logs them without Twilio. */
+async function alertOwner(db: DB, body: string) {
+  const phone = config.twilio.ownerPhone ?? (db.prepare("SELECT phone FROM notify WHERE phone IS NOT NULL LIMIT 1").get() as any)?.phone;
+  if (!phone) return console.log(`[alert] (no owner phone set) ${body}`);
+  try {
+    await sendSms(db, phone, body);
+  } catch (e) {
+    console.error("[alert]", e);
+  }
+}
+
 async function notifyEvent(db: DB, agentId: string, event: "paused" | "budget80", body: string) {
   const n = db.prepare("SELECT * FROM notify WHERE agent_id=?").get(agentId) as any;
   const phone = n?.phone ?? config.twilio.ownerPhone;

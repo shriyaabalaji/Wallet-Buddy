@@ -229,7 +229,7 @@ export function ledgerMetrics(db: DB) {
     decisionLatencyMs: { samples: lat.n, avg: lat.avg == null ? null : Math.round(lat.avg * 10) / 10, p95, max: lat.max },
     worstCaseLoss: {
       perDayUsdc: dailyTopup,
-      explanation: `On testnet the paying wallet's Gateway balance is topped up by at most $${dailyTopup}/day (gateway_topups ledger), so even a fully compromised firewall host can spend at most that much per day through Gateway. Vault holds only release with the owner's passkey (owner key), and expire back to the treasury.`,
+      explanation: `Testnet: the paying wallet's Gateway balance is topped up by at most $${dailyTopup}/day (gateway_topups ledger). That bounds a hijacked agent or a leaked payer credential to $${dailyTopup}/day; the owner's rules usually bound it far lower. It does NOT bound a compromised firewall host, which also holds the treasury and vault-owner keys (README: threat model).`,
     },
   };
 }

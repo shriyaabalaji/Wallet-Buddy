@@ -73,7 +73,7 @@ export default function ProofPage() {
           <Stat label="Decisions" value={`${m.decisions}`} sub={`${m.outcomes.allow} allowed · ${m.outcomes.block} blocked · ${m.outcomes.hold} held`} />
           <Stat label="Holds" value={`${m.holds.approved + m.holds.denied + m.holds.expired + m.holds.held}`} sub={`${m.holds.approved} approved · ${m.holds.denied} denied · ${m.holds.expired} expired → refunded`} />
           <Stat label="Decision latency" value={m.decisionLatencyMs.avg == null ? "—" : `${m.decisionLatencyMs.avg} ms`} sub={m.decisionLatencyMs.samples ? `avg of ${m.decisionLatencyMs.samples} · p95 ${m.decisionLatencyMs.p95} ms` : "no samples yet"} />
-          <Stat label="Worst-case loss" value={`${usd(m.worstCaseLoss.perDayUsdc)}/day`} sub="Gateway top-up cap" />
+          <Stat label="Worst-case loss" value={`${usd(m.worstCaseLoss.perDayUsdc)}/day`} sub="if the agent or payer key is compromised" />
         </section>
       )}
       {m && m.blockedByRule.length > 0 && (

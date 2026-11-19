@@ -130,7 +130,7 @@ describe("FREQUENCY_SPIKE", () => {
     // Lookback for the 10th burst request is (T0+9s−61min, T0+9s−1min]: 59 of the 60 history rows → 0.98/min.
     expect(q[9]).toMatchObject({ measured: { requestsInWindow: 10, basis: "history", lookbackRequests: 59, usualPerWindowX100: 98 } });
     expect(q.slice(0, 9).every((x) => x === undefined)).toBe(true);
-  });
+  }, 20_000); // ~1,000 ledger writes; exceeded the 5s default on a loaded machine
 });
 
 describe("NEW_RECIPIENT", () => {

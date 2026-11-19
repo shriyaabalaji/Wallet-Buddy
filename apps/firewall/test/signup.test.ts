@@ -60,3 +60,21 @@ describe("text-message settings on their own", () => {
     expect((await call("POST", "/v1/agents/ghost/notify", OWNER, { phone: "+16045550100" })).status).toBe(404);
   });
 });
+
+describe("owner-wide settings", () => {
+  it("one phone for every agent; a per-agent number overrides it; agents can't touch it; holds list is global", async () => {
+    const { contactFor, isOwnerPhone } = await import("../src/settings");
+    expect((await call("POST", "/v1/settings", OWNER, { phone: "+16045550111", events: ["hold", "paused", "nope"] })).json).toEqual({ phone: "+16045550111", events: ["hold", "paused"] });
+    expect((await call("GET", "/v1/settings", OWNER)).json).toMatchObject({ phone: "+16045550111", events: ["hold", "paused"] });
+    expect((await call("POST", "/v1/settings", OWNER, { phone: "604 555" })).status).toBe(400);
+    expect((await call("POST", "/v1/settings", ALICE, { phone: "+16045550111" })).status).toBe(403);
+    expect(contactFor(db, "research-agent").phone).toBe("+16045550111"); // no per-agent row → owner-wide
+    expect(contactFor(db, "web-agent").phone).toBe("+16045550100"); // per-agent row from the earlier test wins
+    expect(isOwnerPhone(db, "+16045550111")).toBe(true);
+    expect(isOwnerPhone(db, "+16045550100")).toBe(false);
+    const holds = await call("GET", "/v1/holds", OWNER);
+    expect(holds.status).toBe(200);
+    expect(Array.isArray(holds.json.items)).toBe(true);
+    expect((await call("GET", "/v1/holds", ALICE)).status).toBe(403);
+  });
+});

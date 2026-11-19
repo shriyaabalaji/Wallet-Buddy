@@ -16,6 +16,7 @@ import {
   holdByToken,
   onHold,
   pendingHolds,
+  allPendingHolds,
   registerPasskey,
   registrationOptions,
 } from "./approvals";
@@ -28,6 +29,7 @@ import { CATEGORIES as OPT_CATEGORIES } from "@agent-firewall/policy";
 import { DEMO_PROVIDERS, fetchQuote, listRecommendations, optimizerResolve, recommend, saveRecommendation } from "./optimizer";
 import { proofView } from "./proof";
 import { injectionFlag } from "./injection";
+import { NOTIFY_EVENTS, contactFor, getOwnerSettings, isOwnerPhone, setOwnerSettings, type NotifyEvent } from "./settings";
 
 class HttpError extends Error {
   constructor(public status: number, message: string) {
@@ -266,6 +268,18 @@ route("POST", "/v1/agents/:agentId/notify", "owner", ({ db, params, body }) => {
   db.prepare("INSERT OR REPLACE INTO notify (agent_id, phone, events_json) VALUES (?,?,?)").run(agentId, raw || null, JSON.stringify(events));
   return { agentId, notify: { phone: raw || null, events } };
 });
+
+// Owner-wide settings: the phone that gets texts for every agent (a per-agent number overrides it).
+route("GET", "/v1/settings", "owner", ({ db }) => ({ ...getOwnerSettings(db), twilio: smsConfigured(), envPhoneSet: Boolean(config.twilio.ownerPhone) }));
+route("POST", "/v1/settings", "owner", ({ db, body }) => {
+  const raw = typeof body?.phone === "string" ? body.phone.trim() : "";
+  if (raw && !/^\+[1-9]\d{7,14}$/.test(raw)) throw new HttpError(400, "Phone must be in international format, like +16045550100.");
+  const events = Array.isArray(body?.events) ? NOTIFY_EVENTS.filter((e) => body.events.includes(e)) : (["hold"] as NotifyEvent[]);
+  setOwnerSettings(db, { phone: raw || null, events });
+  return getOwnerSettings(db);
+});
+// Every agent's held payments, for the global Overview.
+route("GET", "/v1/holds", "owner", ({ db }) => ({ items: allPendingHolds(db) }));
 
 route("POST", "/v1/agents/:agentId/pause", "owner", async ({ db, params, body }) => {
   requireAgent(db, params.agentId!);
@@ -539,8 +553,9 @@ route("POST", "/v1/twilio/inbound", "webhook", async ({ db, req, raw }) => {
     const r = await denyLatestByPhone(db, from);
     reply = r.ok ? `Cancelled ${r.count === 1 ? "the payment" : `${r.count} payments`}. The money is going back to your wallet.` : "Nothing is waiting for you right now.";
   } else if (/^PAUSE\b/.test(text)) {
-    const agents = db.prepare("SELECT agent_id FROM notify WHERE phone=?").all(from) as any[];
-    const ids = agents.length ? agents.map((a) => a.agent_id) : from === config.twilio.ownerPhone ? ["research-agent"] : [];
+    const ids = isOwnerPhone(db, from)
+      ? (db.prepare("SELECT id FROM agents WHERE status='active'").all() as any[]).map((a) => a.id)
+      : (db.prepare("SELECT agent_id FROM notify WHERE phone=?").all(from) as any[]).map((a) => a.agent_id);
     ids.forEach((id) => setPaused(db, id, true, "Paused by text message"));
     reply = ids.length ? "Your agent is paused. It can't spend anything until you resume it." : "We don't recognize this number.";
   } else if (/^(YES|Y|APPROVE|OK)\b/.test(text)) {
@@ -554,7 +569,7 @@ route("POST", "/v1/twilio/inbound", "webhook", async ({ db, req, raw }) => {
 // ---------- notifications ----------
 /** Security alerts go to the owner's phone whenever one is set (no opt-in needed). Dry-run logs them without Twilio. */
 async function alertOwner(db: DB, body: string) {
-  const phone = config.twilio.ownerPhone ?? (db.prepare("SELECT phone FROM notify WHERE phone IS NOT NULL LIMIT 1").get() as any)?.phone;
+  const phone = getOwnerSettings(db).phone ?? config.twilio.ownerPhone ?? (db.prepare("SELECT phone FROM notify WHERE phone IS NOT NULL LIMIT 1").get() as any)?.phone;
   if (!phone) return console.log(`[alert] (no owner phone set) ${body}`);
   try {
     await sendSms(db, phone, body);
@@ -564,9 +579,7 @@ async function alertOwner(db: DB, body: string) {
 }
 
 async function notifyEvent(db: DB, agentId: string, event: "paused" | "budget80", body: string) {
-  const n = db.prepare("SELECT * FROM notify WHERE agent_id=?").get(agentId) as any;
-  const phone = n?.phone ?? config.twilio.ownerPhone;
-  const events: string[] = n ? JSON.parse(n.events_json) : [];
+  const { phone, events } = contactFor(db, agentId);
   if (!phone || !events.includes(event)) return;
   try {
     await sendSms(db, phone, body);

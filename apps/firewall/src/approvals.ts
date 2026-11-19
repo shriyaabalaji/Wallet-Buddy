@@ -1,5 +1,6 @@
 // Hold lifecycle: hold → (deny | approve-with-passkey | expire → refund).
 // Denying is always safe (SMS "NO" works). Releasing money requires a verified passkey.
+import { contactFor, isOwnerPhone } from "./settings";
 import {
   generateAuthenticationOptions,
   generateRegistrationOptions,
@@ -55,6 +56,11 @@ function view(row: any, includeToken: boolean): HeldView {
   };
 }
 
+/** Every agent's waiting holds, soonest-expiring first (owner Overview). */
+export function allPendingHolds(db: DB): (HeldView & { agentId: string })[] {
+  return (db.prepare(`${SELECT_HOLD} WHERE h.status = 'held' ORDER BY h.expires_ms`).all() as any[]).map((r) => ({ ...view(r, config.devMode), agentId: r.agent_id }));
+}
+
 export function pendingHolds(db: DB, agentId: string): HeldView[] {
   return (db.prepare(`${SELECT_HOLD} WHERE r.agent_id = ? AND h.status = 'held' ORDER BY h.expires_ms`).all(agentId) as any[]).map((r) => view(r, config.devMode));
 }
@@ -71,9 +77,7 @@ export async function onHold(db: DB, requestId: string, token: string, expiresAt
   const policy = activePolicy(db, row.agent_id);
   const allow = policy?.rules.find((r) => r.kind === "allowlist");
   const known = allow?.kind === "allowlist" ? allow.recipients.includes(row.recipient.toLowerCase()) : false;
-  const notify = db.prepare("SELECT * FROM notify WHERE agent_id = ?").get(row.agent_id) as any;
-  const phone = notify?.phone ?? config.twilio.ownerPhone;
-  const events: string[] = notify ? JSON.parse(notify.events_json) : ["hold"];
+  const { phone, events } = contactFor(db, row.agent_id);
 
   const link = `${config.appBaseUrl}/a/${token}`;
   const tasks: Promise<unknown>[] = [];
@@ -127,9 +131,10 @@ export async function denyHold(db: DB, requestId: string): Promise<{ ok: boolean
 
 /** Deny the newest pending hold for an agent (SMS "NO" has no request id). */
 export async function denyLatestByPhone(db: DB, phone: string): Promise<{ ok: boolean; count: number }> {
-  const rows = db
-    .prepare(`${SELECT_HOLD} LEFT JOIN notify n ON n.agent_id = r.agent_id WHERE h.status='held' AND (n.phone = ? OR ? = ?) ORDER BY h.expires_ms DESC`)
-    .all(phone, phone, config.twilio.ownerPhone ?? "") as any[];
+  // The owner's number cancels across every agent; a per-agent number only cancels that agent's holds.
+  const rows = isOwnerPhone(db, phone)
+    ? (db.prepare(`${SELECT_HOLD} WHERE h.status='held' ORDER BY h.expires_ms DESC`).all() as any[])
+    : (db.prepare(`${SELECT_HOLD} LEFT JOIN notify n ON n.agent_id = r.agent_id WHERE h.status='held' AND n.phone = ? ORDER BY h.expires_ms DESC`).all(phone) as any[]);
   let count = 0;
   for (const row of rows) if ((await denyHold(db, row.request_id)).ok) count++;
   return { ok: count > 0, count };

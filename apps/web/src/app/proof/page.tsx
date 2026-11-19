@@ -67,7 +67,7 @@ export default function ProofPage() {
       {!data && !err && <p className="muted" role="status">Loading…</p>}
 
       {m && (
-        <section aria-label="Metrics" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }}>
+        <section aria-label="Metrics" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
           <Stat label="Payments settled" value={String(m.paymentsSettled)} />
           <Stat label="Total spent" value={usd(m.totalSpentUsdc)} />
           <Stat label="Decisions" value={`${m.decisions}`} sub={`${m.outcomes.allow} allowed · ${m.outcomes.block} blocked · ${m.outcomes.hold} held`} />

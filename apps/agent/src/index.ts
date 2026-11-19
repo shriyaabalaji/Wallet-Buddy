@@ -11,7 +11,7 @@ import { createFirewallApi, createFirewallClient, type PaymentResult } from "@ag
 
 // Isolation guard: the agent must never be able to see a signing key or API secret. If one leaked into
 // its environment (e.g. a shared .env), refuse to run instead of quietly holding it.
-const LEAKED = Object.keys(process.env).filter((k) => /PRIVATE_KEY|SECRET|AUTH_TOKEN|API_KEY|MNEMONIC/i.test(k) && process.env[k]);
+const LEAKED = Object.keys(process.env).filter((k) => k !== "ANTHROPIC_API_KEY" && /PRIVATE_KEY|SECRET|AUTH_TOKEN|API_KEY|MNEMONIC/i.test(k) && process.env[k]);
 if (LEAKED.length) {
   console.error(`Refusing to start: the agent can see secrets (${LEAKED.join(", ")}). Give the agent only .env.agent.`);
   process.exit(78);

@@ -35,6 +35,15 @@ function AgentCard({ a, selected, onOpen, onChanged }: { a: AgentListItem; selec
       await onChanged();
     } catch (e) { setErr(e instanceof Error ? e.message : "Couldn't update the agent."); } finally { setBusy(false); }
   }
+  const [newKey, setNewKey] = useState<string | null>(null);
+  async function rotate() {
+    setBusy(true); setErr(null);
+    try {
+      const r = await api<{ key: string }>(`/v1/agents/${encodeURIComponent(a.id)}/key`, { method: "POST", body: {} });
+      setNewKey(r.key);
+      await onChanged();
+    } catch (e) { setErr(e instanceof Error ? e.message : "Couldn't create a key."); } finally { setBusy(false); }
+  }
   const { budget, today } = a;
   return (
     <article className={`card ${a.pendingApprovals ? "attention" : ""}`} aria-label={displayName(a.name)}>
@@ -59,40 +68,62 @@ function AgentCard({ a, selected, onOpen, onChanged }: { a: AgentListItem; selec
         <div className="kv"><span>Agent token</span><span>{a.credentialConfigured ? "Configured" : "Not configured"}</span></div>
       </div>
       {err && <p role="alert" style={{ color: "var(--orange)" }}>{err}</p>}
+      {newKey && <div className="callout info" role="status"><p className="small">New key (shown once; the old one no longer works):</p><p className="mono small" style={{ wordBreak: "break-all", userSelect: "all" }}>{newKey}</p></div>}
       <div className="toolbar" style={{ marginTop: "auto" }}>
         <Link className="btn secondary" href="/" onClick={onOpen}>Open</Link>
         <button className={`btn ${paused ? "" : "attention secondary"}`} onClick={toggle} disabled={busy}>
           <Icon name={paused ? "play" : "pause"} size={16} />{paused ? "Resume" : "Pause"}
         </button>
+        <button className="btn secondary" onClick={rotate} disabled={busy}>New key</button>
       </div>
     </article>
   );
 }
 
+// Starter rules for a new agent (editable on the Rules page): $1 per task, $5 per day, ask me above $0.50,
+// only the demo sellers. Saving them commits the policy hash on Arc like any other rule change.
+const STARTER_RULES = [
+  { id: "task-budget", kind: "taskBudget", taskId: "*", maxMicro: 1_000_000 },
+  { id: "day-budget", kind: "periodBudget", period: "day", maxMicro: 5_000_000 },
+  { id: "ask-first", kind: "approvalThreshold", aboveMicro: 500_000 },
+  { id: "approved-sellers", kind: "allowlist", recipients: ["sportsfeed", "statline", "oddsapi"], onViolation: "block" },
+];
+
+interface Created { id: string; key: string; wallet: { address: string | null; mode: string } | null; rulesSaved: boolean }
+
 function Register({ suggested, onDone }: { suggested: string; onDone: (id: string) => Promise<void> }) {
   const [id, setId] = useState(suggested);
   const [name, setName] = useState("");
+  const [starter, setStarter] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  // Prefill the demo id once we know the firewall has no agents.
+  const [err, setErr] = useState<string | null>(null);
+  const [created, setCreated] = useState<Created | null>(null);
+  const [copied, setCopied] = useState(false);
   useEffect(() => { if (suggested) setId((v) => v || suggested); }, [suggested]);
   async function submit(e: FormEvent) {
     e.preventDefault();
-    setBusy(true); setMsg(null);
+    setBusy(true); setErr(null); setCreated(null); setCopied(false);
+    const agentId = id.trim();
     try {
-      await api("/v1/agents", { method: "POST", body: { id: id.trim(), name: name.trim() || undefined } });
-      setMsg({ ok: true, text: `Registered ${id.trim()}. Next: save rules for it, and add its token to FIREWALL_AGENT_TOKENS on the firewall.` });
-      const done = id.trim();
+      const r = await api<{ key: string; wallet: Created["wallet"] }>("/v1/agents", { method: "POST", body: { id: agentId, name: name.trim() || undefined, issueKey: true } });
+      let rulesSaved = false;
+      if (starter) {
+        try { await api("/v1/policy", { method: "POST", body: { agentId, rules: STARTER_RULES, confirmed: true } }); rulesSaved = true; } catch { /* shown below */ }
+      }
+      setCreated({ id: agentId, key: r.key, wallet: r.wallet, rulesSaved });
       setId(""); setName("");
-      await onDone(done);
-    } catch (err) {
-      setMsg({ ok: false, text: err instanceof ApiError || err instanceof Error ? err.message : "Couldn't register the agent." });
+      await onDone(agentId);
+    } catch (e2) {
+      setErr(e2 instanceof ApiError || e2 instanceof Error ? e2.message : "Couldn't add the agent.");
     } finally { setBusy(false); }
+  }
+  async function copy() {
+    if (!created) return;
+    try { await navigator.clipboard.writeText(created.key); setCopied(true); } catch { /* user can select it */ }
   }
   return (
     <form className="panel" onSubmit={submit} aria-labelledby="reg">
-      <h2 id="reg">Register an agent</h2>
-      <p className="muted">This adds the agent to the firewall so you can give it rules and watch it. It doesn&apos;t create a wallet or a credential: the agent can&apos;t pay until it has rules and a token in <span className="mono">FIREWALL_AGENT_TOKENS</span>.</p>
+      <h2 id="reg">Add an agent</h2>
       <div className="two">
         <div className="field">
           <label htmlFor="reg-id">Agent id</label>
@@ -103,8 +134,23 @@ function Register({ suggested, onDone }: { suggested: string; onDone: (id: strin
           <input id="reg-name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Research agent" maxLength={60} />
         </div>
       </div>
-      <div><button className="btn" type="submit" disabled={busy || !id.trim()}>{busy ? "Registering…" : "Register agent"}</button></div>
-      {msg && <div className={`callout ${msg.ok ? "info" : "attention"}`} role="status"><p>{msg.text}</p></div>}
+      <label className="small" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input type="checkbox" checked={starter} onChange={(e) => setStarter(e.target.checked)} />
+        Start with safe rules: $1 per task, $5 a day, ask me above $0.50, demo sellers only
+      </label>
+      <div><button className="btn" type="submit" disabled={busy || !id.trim()}>{busy ? "Adding…" : "Add agent"}</button></div>
+      {err && <div className="callout attention" role="alert"><p>{err}</p></div>}
+      {created && (
+        <div className="callout info" role="status">
+          <p><strong>{created.id}</strong> is ready{created.rulesSaved ? " with starter rules" : "; it can't spend until you save rules"}. Copy its key now: it won&apos;t be shown again.</p>
+          <p className="mono small" style={{ wordBreak: "break-all", userSelect: "all" }}>{created.key}</p>
+          <div className="toolbar">
+            <button type="button" className="btn secondary" onClick={copy}>{copied ? "Copied" : "Copy key"}</button>
+            <Link className="btn secondary" href="/rules">Edit rules</Link>
+          </div>
+          <p className="small muted">Give it to your agent as <span className="mono">FIREWALL_AGENT_TOKEN</span>. It pays from your Circle Agent Wallet{created.wallet?.address ? <> (<span className="mono">{created.wallet.address.slice(0, 6)}…{created.wallet.address.slice(-4)}</span>)</> : null}; Wallet Buddy checks this agent&apos;s own rules before every payment.</p>
+        </div>
+      )}
     </form>
   );
 }

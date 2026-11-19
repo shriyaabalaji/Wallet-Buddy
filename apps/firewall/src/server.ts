@@ -22,7 +22,7 @@ import {
 import { sendSms, smsConfigured, twiml, validTwilioSignature } from "./sms";
 import { SignError, signForRequest } from "./signer";
 import { PAY_NETWORK, PayError, network, payWithCircle, payerAddress, paymentMode } from "./payer";
-import { authConfig, authenticate, authSummary, type AuthConfig, type Principal } from "./auth";
+import { authConfig, authenticate, authSummary, issueAgentKey, withIssuedKeys, type AuthConfig, type Principal } from "./auth";
 import { activityFilter, hourlySeries, listAgents, settlementOf, todayTotals } from "./overview";
 import { CATEGORIES as OPT_CATEGORIES } from "@agent-firewall/policy";
 import { DEMO_PROVIDERS, fetchQuote, listRecommendations, optimizerResolve, recommend, saveRecommendation } from "./optimizer";
@@ -239,7 +239,18 @@ route("POST", "/v1/agents", "owner", ({ db, body }) => {
   const name = typeof body?.name === "string" && body.name.trim() ? body.name.trim().slice(0, 60) : id.replace(/-/g, " ");
   if (db.prepare("SELECT 1 FROM agents WHERE id=?").get(id)) throw new HttpError(409, `An agent "${id}" is already registered.`);
   ensureAgent(db, id, name);
-  return { agent: { id, name, status: "active" }, wallet: null, note: "Registered in the firewall only. No wallet or credential was created." };
+  if (body?.issueKey !== true) return { agent: { id, name, status: "active" }, wallet: null, note: "Registered in the firewall only. No wallet or credential was created." };
+  // Website signup: issue the agent's key now (shown once). All agents pay from the one configured payer (the Circle
+  // Agent Wallet by default); each agent's own rules and budgets are enforced by the firewall before any payment.
+  return { agent: { id, name, status: "active" }, key: issueAgentKey(db, id), wallet: { address: payerAddress(), mode: paymentMode, shared: true },
+    note: "Copy this key now; it won't be shown again. Give it to your agent as FIREWALL_AGENT_TOKEN. It can't pay until you save rules." };
+});
+
+// Create a new key for an existing agent (lost or leaked key). The previous dashboard-issued key stops working.
+route("POST", "/v1/agents/:agentId/key", "owner", ({ db, params }) => {
+  const { agentId } = params as { agentId: string };
+  requireAgent(db, agentId);
+  return { agentId, key: issueAgentKey(db, agentId), note: "Copy this key now; it won't be shown again. The previous key no longer works." };
 });
 
 route("POST", "/v1/agents/:agentId/pause", "owner", async ({ db, params, body }) => {
@@ -573,8 +584,9 @@ export function createApp(db: DB, auth: AuthConfig = authConfig) {
   );
 }
 
-async function handle(db: DB, auth: AuthConfig, req: IncomingMessage, res: ServerResponse) {
+async function handle(db: DB, envAuth: AuthConfig, req: IncomingMessage, res: ServerResponse) {
   cors(res);
+  const auth = withIssuedKeys(db, envAuth);
   if (req.method === "OPTIONS") return res.writeHead(204).end();
   const url = new URL(req.url ?? "/", "http://x");
   const match = routes.find((r) => r.method === req.method && r.re.test(url.pathname));

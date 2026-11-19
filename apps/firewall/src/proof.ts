@@ -11,7 +11,10 @@ import { config, explorerTx } from "./config";
 import type { DB } from "./db";
 
 const CHUNK = 4_000n;
-const PARALLEL = 6;
+// One chunk at a time with a short pause: the public Arc RPC rate-limits ("Request exceeds defined limit"), and the
+// funding job and vault txs share it.
+const PARALLEL = 1;
+const PAUSE_MS = 250;
 // Block of the Deploy.s.sol broadcast (contracts/broadcast/Deploy.s.sol/5042002/run-latest.json).
 const DEPLOY_BLOCK = BigInt(process.env.PROOF_FROM_BLOCK ?? 72_618_073);
 const USDC = (process.env.USDC_ADDRESS ?? "0x3600000000000000000000000000000000000000") as Hex;
@@ -96,13 +99,13 @@ async function logsInRange(from: bigint, to: bigint): Promise<Log[]> {
   return (await Promise.all(jobs)).flat();
 }
 
-async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, tries = 5): Promise<T> {
   for (let i = 0; ; i++) {
     try {
       return await fn();
     } catch (e) {
       if (i + 1 >= tries) throw e;
-      await new Promise((r) => setTimeout(r, 500 * (i + 1)));
+      await new Promise((r) => setTimeout(r, (/exceeds defined limit|429|rate/i.test(String((e as Error)?.message)) ? 3000 : 500) * (i + 1)));
     }
   }
 }
@@ -139,6 +142,7 @@ export function indexChain(db: DB, opts: { maxChunks?: number } = {}) {
         for (const r of rows) added += Number(insert.run(r.tx_hash, r.log_index, r.block, times.get(r.block) ?? null, r.kind, r.contract, r.agent_b32, r.request_b32, r.amount_micro, JSON.stringify(r.detail)).changes);
         db.prepare("INSERT INTO chain_cursor (key, block) VALUES ('main', ?) ON CONFLICT(key) DO UPDATE SET block=excluded.block").run(Number(ranges.at(-1)![1]));
         db.exec("COMMIT");
+        await new Promise((r) => setTimeout(r, PAUSE_MS));
       }
       return { scannedTo: Number(from - 1n), added };
     } finally {

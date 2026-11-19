@@ -104,3 +104,30 @@ export const authSummary = (auth: AuthConfig) => ({
 });
 
 export const authConfig = loadAuth();
+
+// ---------- agent keys issued from the dashboard ----------
+// The owner can create an agent and its key on the website (POST /v1/agents/:id/key). The key is shown once and
+// only its SHA-256 digest is stored, in the agent_keys table. Env tokens (FIREWALL_AGENT_TOKENS) keep working.
+import { randomBytes } from "node:crypto";
+import type { DatabaseSync } from "node:sqlite";
+
+export function ensureAgentKeyTable(db: DatabaseSync) {
+  db.exec("CREATE TABLE IF NOT EXISTS agent_keys (agent_id TEXT PRIMARY KEY, digest TEXT NOT NULL, created_at TEXT NOT NULL)");
+}
+
+/** Issue (or rotate) an agent's key. Returns the plaintext once; the old key stops working immediately. */
+export function issueAgentKey(db: DatabaseSync, agentId: string): string {
+  ensureAgentKeyTable(db);
+  const key = `wb_${randomBytes(32).toString("base64url")}`;
+  db.prepare("INSERT INTO agent_keys (agent_id, digest, created_at) VALUES (?,?,?) ON CONFLICT(agent_id) DO UPDATE SET digest=excluded.digest, created_at=excluded.created_at")
+    .run(agentId, digest(key).toString("hex"), new Date().toISOString());
+  return key;
+}
+
+/** The env config plus the dashboard-issued keys, read fresh so a new or rotated key works without a restart. */
+export function withIssuedKeys(db: DatabaseSync, auth: AuthConfig): AuthConfig {
+  ensureAgentKeyTable(db);
+  const rows = db.prepare("SELECT agent_id, digest FROM agent_keys").all() as { agent_id: string; digest: string }[];
+  if (!rows.length) return auth;
+  return { ...auth, agents: [...auth.agents, ...rows.map((r) => ({ agentId: r.agent_id, digest: Buffer.from(r.digest, "hex") }))] };
+}

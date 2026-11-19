@@ -43,12 +43,21 @@ export async function buy(path: string, opts: { recipient: string; category: Cat
 
 const log = (tag: string, r: BuyResult) => console.log(`  ${tag.padEnd(28)} ${r.outcome.toUpperCase().padEnd(6)} ${r.reason}`);
 
+/** One line for an injury report: the sellers return { provider, injuries: [{ player, teamAbbr, status, detail }] }. */
+function describeReport(d: any): string {
+  if (typeof d?.report === "string") return d.report;
+  const rows: any[] = Array.isArray(d?.injuries) ? d.injuries : [];
+  if (!rows.length) return `no injuries listed (${d?.provider ?? "unknown source"})`;
+  const first = rows[0];
+  return `${rows.length} injur${rows.length === 1 ? "y" : "ies"} from ${d.provider}; first: ${first.player} (${first.teamAbbr}) ${first.status}${first.detail ? `, ${first.detail}` : ""}`;
+}
+
 async function normal(n: number) {
   console.log(`\n▶ Normal work: buying ${n} injury reports`);
   for (let i = 0; i < n; i++) {
     const r = await buy("/sportsfeed/injuries", { recipient: "sportsfeed", category: "data", purpose: "An injury report" });
     log(`injury report #${i + 1}`, r);
-    if (r.data) console.log(`    ↳ ${(r.data as any).report}`);
+    if (r.data) console.log(`    ↳ ${describeReport(r.data)}`);
   }
 }
 

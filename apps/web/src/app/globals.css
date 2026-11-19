@@ -297,3 +297,24 @@ table.activity .tags { flex-direction: column; align-items: flex-start; }
 .login h1 { font-size: 1.6rem; }
 .login .btn { width: 100%; }
 input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid var(--blue-wash); outline-offset: 0; border-color: var(--usdc); }
+/* rules page: rules in force on the left; add a rule + text messages stacked on the right */
+.rules-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+.rules-col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.rules-split textarea { min-height: 92px; }
+.rules-split .draft { display: flex; flex-direction: column; gap: 12px; border-top: 1px solid var(--line); padding-top: 14px; }
+.rules-split .draft .small-h { margin: 0; }
+.rules-split .tests { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+.checks { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0 20px; min-width: 0; }
+.checks legend { padding: 0; margin-bottom: 2px; width: 100%; }
+.field-err { color: var(--orange); font-size: .85rem; }
+.sms-actions { align-items: center; }
+.saved-note { display: inline-flex; align-items: center; gap: 6px; color: var(--blue); font-weight: 500; font-size: .9rem; }
+.rules-split .panel-head { gap: 12px; }
+.rules-split .panel-head .btn { white-space: nowrap; flex-shrink: 0; }
+/* One column: rules, add a rule, text messages, then the passkey panel last. */
+@media (max-width: 900px) {
+  .rules-split { display: flex; flex-direction: column; }
+  .rules-col { display: contents; }
+  .rules-split .passkey-slot { order: 1; }
+}
+@media (max-width: 480px) { .rules-split .panel-head .btn { padding: 0 14px; } }

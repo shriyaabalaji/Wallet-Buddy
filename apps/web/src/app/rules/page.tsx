@@ -1,6 +1,6 @@
 "use client";
 import { PasskeySetup } from "@/passkey";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { describeRule, usdToMicro, type AnomalySeverity, type Rule } from "@agent-firewall/policy";
 import {
   api, txUrl,
@@ -10,6 +10,7 @@ import { useAgents } from "@/lib/agents";
 import { usePoll } from "@/lib/hooks";
 import { ErrorState, Icon, NoAgents, VerifyLink } from "@/components";
 import { ApiError } from "@/lib/api";
+import { formatPhone, normalizePhone } from "./phone";
 
 const DEMO_TEXT = "Up to $10 for this task, $5 a day. Text me before anything over $1. Only pay sportsfeed and oddsapi.";
 const OUTCOME_TEXT = { allow: "Pays", hold: "Texts you first", block: "Blocked" } as const;
@@ -72,7 +73,7 @@ export default function RulesPage() {
 }
 
 function RulesFor({ agentId }: { agentId: string }) {
-  const { agent, refreshAgents } = useAgents();
+  const { agent, refreshAgents, health } = useAgents();
   const enc = encodeURIComponent(agentId);
   const current = usePoll(() => api<SavedPolicy>(`/v1/policy/${enc}`), 30000, agentId);
   const [text, setText] = useState(DEMO_TEXT);
@@ -83,14 +84,13 @@ function RulesFor({ agentId }: { agentId: string }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [editErr, setEditErr] = useState<string | null>(null);
-  const [events, setEvents] = useState<Record<NotifyEvent, boolean>>({ hold: true, budget80: false, paused: true });
-  const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState<"compile" | "save" | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [saved, setSaved] = useState<PolicyInfo | null>(null);
   const [pausing, setPausing] = useState(false);
 
   const fail = (e: unknown) => setError(e instanceof ApiError ? e : new ApiError(e instanceof Error ? e.message : "Something went wrong.", 0));
+  const clearDraft = () => { setRules(null); setTests(null); setAmbiguities([]); setEditing(null); };
 
   async function runTests(r: Rule[]) {
     try {
@@ -128,11 +128,10 @@ function RulesFor({ agentId }: { agentId: string }) {
     if (!rules) return;
     setBusy("save"); setError(null);
     try {
-      const notify = phone.trim()
-        ? { phone: phone.trim(), events: (Object.keys(events) as NotifyEvent[]).filter((k) => events[k]) }
-        : undefined;
-      const res = await api<{ policy: PolicyInfo }>("/v1/policy", { method: "POST", body: { agentId, rules, notify, confirmed: true } });
+      // No `notify`: the firewall leaves text settings untouched when it's omitted. They're saved in their own panel.
+      const res = await api<{ policy: PolicyInfo }>("/v1/policy", { method: "POST", body: { agentId, rules, confirmed: true } });
       setSaved(res.policy);
+      clearDraft();
       await Promise.all([current.refresh(), refreshAgents()]);
     } catch (e) { fail(e); } finally { setBusy(null); }
   }
@@ -143,10 +142,6 @@ function RulesFor({ agentId }: { agentId: string }) {
     if (!p?.policy) return;
     setError(null); setSaved(null); setEditing(null); setAmbiguities([]); setTests(null);
     setRules(p.policy.rules); setViews(p.views);
-    if (p.notify?.phone) {
-      setPhone(p.notify.phone);
-      setEvents({ hold: p.notify.events.includes("hold"), budget80: p.notify.events.includes("budget80"), paused: p.notify.events.includes("paused") });
-    }
     await runTests(p.policy.rules);
   }
 
@@ -158,6 +153,8 @@ function RulesFor({ agentId }: { agentId: string }) {
       await refreshAgents();
     } catch (e) { fail(e); } finally { setPausing(false); }
   }
+
+  const arcLive = Boolean(health?.arc?.registry);
 
   return (
     <>
@@ -174,108 +171,23 @@ function RulesFor({ agentId }: { agentId: string }) {
       </section>
       {paused && <div className="callout attention" role="status"><strong>This agent is paused</strong><p>It can&apos;t spend anything until you resume it{agent?.pausedReason ? `. Reason: ${agent.pausedReason}` : ""}.</p></div>}
 
-      <section className="panel" aria-labelledby="s0">
-        <div className="panel-head">
-          <h2 id="s0">Rules in force now</h2>
-          {current.data?.policy && <button className="btn secondary" onClick={editCurrent} disabled={busy !== null}><Icon name="edit" size={16} />Edit these rules</button>}
-        </div>
-        {current.error && !current.data ? <ErrorState error={current.error} onRetry={current.refresh} /> : !current.data ? (
-          <p className="muted" role="status">Loading…</p>
-        ) : !current.data.policy ? (
-          <p className="muted">No rules saved for this agent, so it can&apos;t spend anything. Describe them below.</p>
-        ) : (
-          <>
-            <ul className="pol">{current.data.views.map((v) => <li key={v.ruleId}><span className="kind">Enforced by {v.enforcedBy}</span><span>{v.sentence}</span></li>)}</ul>
-            <p className="lockline"><Icon name="lock" size={15} />Fingerprint <span className="mono">{current.data.policy.hash.slice(0, 10)}…</span><VerifyLink href={txUrl(current.data.policy.committedTx, current.data.policy.committedTxUrl)}>verify</VerifyLink></p>
-          </>
-        )}
-      </section>
-
-      <section className="panel" aria-labelledby="s1">
-        <h2 id="s1"><span className="step-n" aria-hidden="true">1</span>{current.data?.policy ? "Or describe new rules" : "Tell us"}</h2>
-        <div className="field">
-          <label htmlFor="rules-text">Describe what your agent may spend, in your own words.</label>
-          <textarea id="rules-text" value={text} onChange={(e) => setText(e.target.value)} />
-        </div>
-        <div><button className="btn" onClick={compile} disabled={busy !== null || !text.trim()}>{busy === "compile" ? "Reading…" : "Compile"}</button></div>
-      </section>
-
-      {error && <ErrorState error={error} />}
-
-      <PasskeySetup />
-
-      {rules && (
-        <>
-          <section className="panel" aria-labelledby="s2">
-            <h2 id="s2"><span className="step-n" aria-hidden="true">2</span>Here&apos;s what will apply to <span className="mono">{agentId}</span></h2>
-            {ambiguities.map((a) => (
-              <div key={a.phrase} className="callout attention" role="note">
-                <strong>Not sure about &ldquo;{a.phrase}&rdquo;</strong>
-                <p>{a.question}</p>
-              </div>
-            ))}
-            {rules.length === 0 && <p className="muted">We couldn&apos;t find any rules in that. Try adding amounts, like &ldquo;$5 a day&rdquo;.</p>}
-            {rules.map((rule) => {
-              const view = views.find((v) => v.ruleId === rule.id);
-              const ed = editable(rule);
-              const fid = `edit-${rule.id}`;
-              return (
-                <div className="rule" key={rule.id}>
-                  <p className="sentence">{sentenceFor(rule, views)}</p>
-                  <p className="meta">Enforced by: {view?.enforcedBy ?? "the firewall"}</p>
-                  {editing === rule.id && ed ? (
-                    <div>
-                      <label htmlFor={fid} className="muted">{ed.label}</label>
-                      <div className="edit-row">
-                        {ed.kind === "severity" ? (
-                          <select id={fid} value={draft} onChange={(e) => setDraft(e.target.value)}>
-                            <option value="low">Slightly unusual</option><option value="medium">Unusual</option><option value="high">Highly unusual</option>
-                          </select>
-                        ) : (
-                          <input id={fid} type="text" value={draft} onChange={(e) => setDraft(e.target.value)} inputMode={ed.kind === "list" ? "text" : "decimal"} />
-                        )}
-                        <button className="btn" onClick={() => commitEdit(rule)}>Apply</button>
-                        <button className="btn secondary" onClick={() => setEditing(null)}>Cancel</button>
-                      </div>
-                      {editErr && <p role="alert" style={{ color: "var(--orange)" }}>{editErr}</p>}
-                    </div>
-                  ) : ed ? (
-                    <div><button className="btn secondary" onClick={() => startEdit(rule)} aria-label={`Edit: ${sentenceFor(rule, views)}`}>Edit</button></div>
-                  ) : null}
-                </div>
-              );
-            })}
-          </section>
-
-          <section className="panel" aria-labelledby="s3">
-            <h2 id="s3"><span className="step-n" aria-hidden="true">3</span>Quick test</h2>
-            <p className="muted">Sample payments run against these rules. Nothing is spent.</p>
-            {!tests ? <p className="muted" role="status">Running…</p> : (
-              <ul className="tests">
-                {tests.map((t) => (
-                  <li key={t.label}>
-                    <span className={`badge ${t.outcome === "allow" ? "ok" : "warn"}`}>{OUTCOME_TEXT[t.outcome]}</span>
-                    <strong>{t.label}</strong>
-                    <span className="muted">{t.reason}</span>
-                  </li>
-                ))}
-              </ul>
+      <div className="rules-split">
+        <div className="rules-col">
+          <section className="panel" aria-labelledby="s0">
+            <div className="panel-head">
+              <h2 id="s0">Rules in force now</h2>
+              {current.data?.policy && <button className="btn secondary" onClick={editCurrent} disabled={busy !== null}><Icon name="edit" size={16} />Edit these rules</button>}
+            </div>
+            {current.error && !current.data ? <ErrorState error={current.error} onRetry={current.refresh} /> : !current.data ? (
+              <p className="muted" role="status">Loading…</p>
+            ) : !current.data.policy ? (
+              <p className="muted">No rules saved for this agent, so it can&apos;t spend anything. Add one on the right.</p>
+            ) : (
+              <>
+                <ul className="pol">{current.data.views.map((v) => <li key={v.ruleId}><span className="kind">Enforced by {v.enforcedBy}</span><span>{v.sentence}</span></li>)}</ul>
+                <p className="lockline"><Icon name="lock" size={15} />Fingerprint <span className="mono">{current.data.policy.hash.slice(0, 10)}…</span><VerifyLink href={txUrl(current.data.policy.committedTx, current.data.policy.committedTxUrl)}>verify</VerifyLink></p>
+              </>
             )}
-          </section>
-
-          <section className="panel" aria-labelledby="s4">
-            <h2 id="s4">Text me when</h2>
-            <div>
-              <label className="check"><input type="checkbox" checked={events.hold} onChange={(e) => setEvents({ ...events, hold: e.target.checked })} /> A payment needs my approval</label>
-              <label className="check"><input type="checkbox" checked={events.budget80} onChange={(e) => setEvents({ ...events, budget80: e.target.checked })} /> 80% of the budget is used</label>
-              <label className="check"><input type="checkbox" checked={events.paused} onChange={(e) => setEvents({ ...events, paused: e.target.checked })} /> My agent gets paused</label>
-            </div>
-            <div className="field">
-              <label htmlFor="phone">Your phone number</label>
-              <input id="phone" type="tel" autoComplete="tel" placeholder="+1 555 123 4567" value={phone} onChange={(e) => setPhone(e.target.value)} />
-            </div>
-            <p className="muted">Saving replaces the rules for <span className="mono">{agentId}</span> and locks a fingerprint on Arc (about 1¢). Nothing changes until you press the button.</p>
-            <div><button className="btn" onClick={save} disabled={busy !== null || rules.length === 0}>{busy === "save" ? "Saving…" : "Save rules"}</button></div>
             {saved && (
               <div className="callout info" role="status">
                 <strong>Rules saved{saved.committedTx || saved.committedTxUrl ? " and locked on Arc" : ""}</strong>
@@ -284,8 +196,185 @@ function RulesFor({ agentId }: { agentId: string }) {
               </div>
             )}
           </section>
-        </>
-      )}
+          <div className="passkey-slot"><PasskeySetup /></div>
+        </div>
+
+        <div className="rules-col">
+          <section className="panel" aria-labelledby="s1">
+            <h2 id="s1">Add a rule</h2>
+            <div className="field">
+              <label htmlFor="rules-text">Describe what your agent may spend, in your own words.</label>
+              <textarea id="rules-text" value={text} onChange={(e) => setText(e.target.value)} />
+            </div>
+            <div><button className="btn" onClick={compile} disabled={busy !== null || !text.trim()}>{busy === "compile" ? "Reading…" : "Compile"}</button></div>
+
+            {error && <ErrorState error={error} />}
+
+            {rules && (
+              <div className="draft">
+                <h3 className="small-h"><span className="step-n" aria-hidden="true">2</span>What will apply to <span className="mono">{agentId}</span></h3>
+                {ambiguities.map((a) => (
+                  <div key={a.phrase} className="callout attention" role="note">
+                    <strong>Not sure about &ldquo;{a.phrase}&rdquo;</strong>
+                    <p>{a.question}</p>
+                  </div>
+                ))}
+                {rules.length === 0 && <p className="muted">We couldn&apos;t find any rules in that. Try adding amounts, like &ldquo;$5 a day&rdquo;.</p>}
+                {rules.map((rule) => {
+                  const view = views.find((v) => v.ruleId === rule.id);
+                  const ed = editable(rule);
+                  const fid = `edit-${rule.id}`;
+                  return (
+                    <div className="rule" key={rule.id}>
+                      <p className="sentence">{sentenceFor(rule, views)}</p>
+                      <p className="meta">Enforced by: {view?.enforcedBy ?? "the firewall"}</p>
+                      {editing === rule.id && ed ? (
+                        <div>
+                          <label htmlFor={fid} className="muted">{ed.label}</label>
+                          <div className="edit-row">
+                            {ed.kind === "severity" ? (
+                              <select id={fid} value={draft} onChange={(e) => setDraft(e.target.value)}>
+                                <option value="low">Slightly unusual</option><option value="medium">Unusual</option><option value="high">Highly unusual</option>
+                              </select>
+                            ) : (
+                              <input id={fid} type="text" value={draft} onChange={(e) => setDraft(e.target.value)} inputMode={ed.kind === "list" ? "text" : "decimal"} />
+                            )}
+                            <button className="btn" onClick={() => commitEdit(rule)}>Apply</button>
+                            <button className="btn secondary" onClick={() => setEditing(null)}>Cancel</button>
+                          </div>
+                          {editErr && <p role="alert" style={{ color: "var(--orange)" }}>{editErr}</p>}
+                        </div>
+                      ) : ed ? (
+                        <div><button className="btn secondary" onClick={() => startEdit(rule)} aria-label={`Edit: ${sentenceFor(rule, views)}`}>Edit</button></div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+
+                <h3 className="small-h"><span className="step-n" aria-hidden="true">3</span>Quick test</h3>
+                <p className="muted small">Sample payments run against these rules. Nothing is spent.</p>
+                {!tests ? <p className="muted" role="status">Running…</p> : (
+                  <ul className="tests">
+                    {tests.map((t) => (
+                      <li key={t.label}>
+                        <span className={`badge ${t.outcome === "allow" ? "ok" : "warn"}`}>{OUTCOME_TEXT[t.outcome]}</span>
+                        <strong>{t.label}</strong>
+                        <span className="muted">{t.reason}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                <p className="muted small">
+                  Saving replaces all the rules for <span className="mono">{agentId}</span> with the ones above
+                  {arcLive ? " and locks a fingerprint on Arc (about 1¢)" : ""}. Nothing changes until you press the button.
+                </p>
+                <div className="toolbar">
+                  <button className="btn" onClick={save} disabled={busy !== null || rules.length === 0}>{busy === "save" ? "Saving…" : "Save rules"}</button>
+                  <button className="btn secondary" onClick={clearDraft} disabled={busy !== null}>Discard</button>
+                </div>
+              </div>
+            )}
+          </section>
+
+          <TextMessages agentId={agentId} saved={current.data ?? null} refresh={current.refresh} twilio={health?.twilio} arcLive={arcLive} />
+        </div>
+      </div>
     </>
   );
 }
+
+const EVENT_LABEL: Record<NotifyEvent, string> = { hold: "Held for approval", budget80: "80% of budget used", paused: "Agent paused" };
+const EVENTS = Object.keys(EVENT_LABEL) as NotifyEvent[];
+// What the firewall does when nothing is stored: approvals.ts texts holds only.
+const DEFAULT_EVENTS: NotifyEvent[] = ["hold"];
+
+/**
+ * Owner text-message settings. The firewall has no notify-only route: settings are written by POST /v1/policy,
+ * so this re-sends the rules currently in force (re-read just before saving, unchanged) alongside them.
+ */
+function TextMessages({ agentId, saved, refresh, twilio, arcLive }: {
+  agentId: string;
+  saved: SavedPolicy | null;
+  refresh: () => unknown;
+  twilio: boolean | undefined;
+  arcLive: boolean;
+}) {
+  const [phone, setPhone] = useState("");
+  const [events, setEvents] = useState<NotifyEvent[]>(DEFAULT_EVENTS);
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [phoneErr, setPhoneErr] = useState<string | null>(null);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+
+  // Fill the form once from what the firewall has stored; later polls don't overwrite what the owner is typing.
+  useEffect(() => {
+    if (loaded || !saved) return;
+    if (saved.notify) {
+      setPhone(saved.notify.phone ? formatPhone(saved.notify.phone) : "");
+      setEvents(saved.notify.events);
+    }
+    setLoaded(true);
+  }, [saved, loaded]);
+
+  const hasRules = Boolean(saved?.policy);
+  const toggle = (e: NotifyEvent, on: boolean) => {
+    setDone(null);
+    setEvents((cur) => (on ? (cur.includes(e) ? cur : [...cur, e]) : cur.filter((x) => x !== e)));
+  };
+
+  async function save() {
+    setError(null); setDone(null);
+    const normalized = normalizePhone(phone);
+    if (!normalized) { setPhoneErr("Include the country code, like +1 604 555 0100."); return; }
+    setPhoneErr(null); setBusy(true);
+    try {
+      // Re-read the rules right before saving so a stale page can't roll back rules changed elsewhere.
+      const fresh = await api<SavedPolicy>(`/v1/policy/${encodeURIComponent(agentId)}`);
+      if (!fresh.policy) throw new ApiError("Save rules for this agent first, then add your number.", 409);
+      await api("/v1/policy", {
+        method: "POST",
+        body: { agentId, rules: fresh.policy.rules, confirmed: true, notify: { phone: normalized, events: EVENTS.filter((e) => events.includes(e)) } },
+      });
+      setPhone(formatPhone(normalized));
+      setDone(events.length ? `Saved. Texts go to ${formatPhone(normalized)}.` : "Saved. No texts will be sent.");
+      await refresh();
+    } catch (e) {
+      setError(e instanceof ApiError ? e : new ApiError(e instanceof Error ? e.message : "Couldn't save.", 0));
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <section className="panel" aria-labelledby="sms">
+      <h2 id="sms">Text messages</h2>
+      <div className="field">
+        <label htmlFor="phone">Your phone number</label>
+        <input
+          id="phone" type="tel" autoComplete="tel" inputMode="tel" placeholder="+1 604 555 0100"
+          value={phone} onChange={(e) => { setPhone(e.target.value); setPhoneErr(null); setDone(null); }}
+          aria-invalid={phoneErr ? true : undefined} aria-describedby={phoneErr ? "phone-err" : undefined}
+        />
+        {phoneErr && <p id="phone-err" role="alert" className="field-err">{phoneErr}</p>}
+      </div>
+      <fieldset className="checks">
+        <legend className="muted small">Text me when</legend>
+        {EVENTS.map((e) => (
+          <label key={e} className="check"><input type="checkbox" checked={events.includes(e)} onChange={(ev) => toggle(e, ev.target.checked)} /> {EVENT_LABEL[e]}</label>
+        ))}
+      </fieldset>
+      <div className="toolbar sms-actions">
+        <button className="btn" onClick={save} disabled={busy || !hasRules || !phone.trim()}>{busy ? "Saving…" : "Save"}</button>
+        {done ? <span className="saved-note" role="status"><Icon name="check" size={16} />{done}</span>
+          : arcLive && hasRules ? <span className="muted small">Also re-locks your unchanged rules on Arc (about 1¢).</span> : null}
+      </div>
+      {error && <ErrorState error={error} />}
+      {saved && !hasRules && <p className="muted small">Save rules for this agent first, then add your number.</p>}
+      <p className="muted small">
+        Approving a held payment still needs your passkey. Reply NO to a text to cancel that payment, or PAUSE to stop your agent.
+        {twilio === false && <><br />Texting isn&apos;t set up on the firewall yet, so texts go to its log instead of your phone.</>}
+      </p>
+    </section>
+  );
+}
+

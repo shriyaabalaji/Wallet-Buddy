@@ -8,7 +8,7 @@ const outfit = Outfit({ subsets: ["latin"], variable: "--font-outfit", display: 
 const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono", display: "swap" });
 
 export const metadata: Metadata = {
-  title: "Agent Firewall",
+  title: "Wallet Buddy",
   description: "Spending rules, human approval and an onchain audit trail for your AI agent.",
 };
 export const viewport: Viewport = { width: "device-width", initialScale: 1 };

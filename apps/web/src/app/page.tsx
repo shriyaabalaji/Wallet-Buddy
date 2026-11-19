@@ -175,7 +175,7 @@ function Overview({ agentId }: { agentId: string }) {
         <div className="stack">
           <div className="card">
             <div className="card-top">
-              <h2>Stopped by firewall</h2>
+              <h2>Stopped by Wallet Buddy</h2>
               <Link className="round-link" href={`/activity?agent=${enc}&status=blocked`} aria-label="See blocked payments"><Icon name="arrow" size={16} /></Link>
             </div>
             <div className="row" style={{ marginTop: "auto" }}>

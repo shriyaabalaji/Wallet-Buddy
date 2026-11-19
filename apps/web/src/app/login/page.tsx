@@ -1,5 +1,6 @@
 "use client";
 import { useState, type FormEvent } from "react";
+import { Brand } from "@/components";
 
 /** Only same-site paths, so ?next= can't send you elsewhere after signing in. */
 function nextPath(): string {
@@ -28,17 +29,17 @@ export default function LoginPage() {
   }
 
   return (
-    <>
-      <h1>Sign in</h1>
+    <div className="login">
+      <Brand />
       <form className="panel" onSubmit={submit} aria-labelledby="login">
-        <h2 id="login">Owner dashboard</h2>
+        <h1 id="login">Sign in</h1>
         <div className="field">
           <label htmlFor="password">Password</label>
           <input id="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         </div>
-        <div><button className="btn" type="submit" disabled={busy || !password}>{busy ? "Signing in…" : "Sign in"}</button></div>
+        <button className="btn" type="submit" disabled={busy || !password}>{busy ? "Signing in…" : "Sign in"}</button>
         {msg && <p role="alert">{msg}</p>}
       </form>
-    </>
+    </div>
   );
 }

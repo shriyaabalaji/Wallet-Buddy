@@ -40,7 +40,7 @@ function ShellFrame({ path, children }: { path: string; children: ReactNode }) {
   return (
     <div className="shell">
       <aside className="sidebar">
-        <Link href="/" className="brand"><span className="brand-mark" aria-hidden="true"><Icon name="shield" size={18} /></span>Agent Firewall</Link>
+        <Brand />
         <nav aria-label="Main" className="nav">
           {NAV.map((n) => (
             <Link key={n.href} href={n.href} aria-current={path === n.href ? "page" : undefined}>
@@ -59,7 +59,7 @@ function ShellFrame({ path, children }: { path: string; children: ReactNode }) {
           </div>
         )}
         <div className="side-foot">
-          <span className="status"><span className={`dot ${online ? "" : "paused"}`} aria-hidden="true" />{online ? (live ? "Arc testnet" : "Local mode") : "Firewall offline"}</span>
+          <span className="status"><span className={`dot ${online ? "" : "paused"}`} aria-hidden="true" />{online ? (live ? "Arc testnet" : "Local mode") : "Wallet Buddy offline"}</span>
           <span className="muted mono">Chain 5042002 · USDC</span>
           <button className="linkish" onClick={signOut}>Sign out</button>
         </div>
@@ -67,6 +67,11 @@ function ShellFrame({ path, children }: { path: string; children: ReactNode }) {
       <main className="page">{children}</main>
     </div>
   );
+}
+
+/** Product name with its mark. Used in the sidebar and on the sign-in page. */
+export function Brand() {
+  return <Link href="/" className="brand"><span className="brand-mark" aria-hidden="true"><Icon name="wallet" size={18} /></span>Wallet Buddy</Link>;
 }
 
 /** Which agent every page shows. Hidden until agents load; nothing to pick when none are registered. */
@@ -203,6 +208,7 @@ const PATHS: Record<string, ReactNode> = {
   undo: <path d="M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3" />,
   users: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a5.5 5.5 0 0 1 3.5 6" /></>,
   bolt: <path d="M13 3 5 14h6l-1 7 8-11h-6z" />,
+  wallet: <><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18v3" /><path d="M4 7.5V17a2 2 0 0 0 2 2h13a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1H6.5A2.5 2.5 0 0 1 4 7.5z" /><path d="M16 13.5h.01" /></>,
 };
 
 export function Icon({ name, size = 18 }: { name: string; size?: number }) {

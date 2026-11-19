@@ -2,7 +2,7 @@
 // Denying is always safe (SMS "NO" works). Releasing money requires a verified passkey.
 import { contactFor, getOwnerSettings, isOwnerPhone } from "./settings";
 import { createHash, randomInt, timingSafeEqual } from "node:crypto";
-import { formatUsd, shortRecipient } from "@agent-firewall/policy";
+import { shortRecipient } from "@agent-firewall/policy";
 import {
   generateAuthenticationOptions,
   generateRegistrationOptions,
@@ -300,9 +300,9 @@ export async function approveByText(db: DB, phone: string, code: string): Promis
     for (const r of live) db.prepare("UPDATE holds SET text_attempts = text_attempts + 1 WHERE request_id=?").run(r.request_id);
     return { ok: false, message: live.length ? "That code doesn't match a waiting payment. Check the code in our text." : "Approving these by text isn't available. Use your passkey on the dashboard." };
   }
-  if (match.amount_micro > ta.maxMicro) return { ok: false, message: `Payments over ${formatUsd(ta.maxMicro)} need your passkey on the dashboard.` };
+  if (match.amount_micro > ta.maxMicro) return { ok: false, message: `Payments over ${(ta.maxMicro / 1e6).toFixed(2)} USDC need your passkey in Wallet Buddy.` };
   if (match.expires_ms <= Date.now()) return { ok: false, message: "That payment expired and was refunded." };
   if (arcStatus().vault && !match.hold_tx) return { ok: false, message: "That payment never reached the vault on Arc, so there's nothing to release." };
   const r = await release(db, match.request_id, "text");
-  return { ok: true, message: `Approved ${formatUsd(match.amount_micro)} to ${shortRecipient(match.recipient)}.${r.releaseTx ? " Released on Arc." : ""}`, releaseTx: r.releaseTx };
+  return { ok: true, message: `Allowed: ${(match.amount_micro / 1e6).toFixed(2)} USDC to ${shortRecipient(match.recipient)}.${r.releaseTx ? " Released on Arc." : ""}`, releaseTx: r.releaseTx };
 }

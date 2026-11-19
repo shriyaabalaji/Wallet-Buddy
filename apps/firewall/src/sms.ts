@@ -70,12 +70,17 @@ export function validTextbeltSignature(signature: string | undefined, timestamp:
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+// Worded to get through US carrier spam filters: a test on 2026-11-19 showed "$0.80 … send … refunds … approve"
+// was filtered (Textbelt status FAILED) while this phrasing ("0.80 USDC", "allow", "cancels itself") was DELIVERED.
+// Never quote seller text here: an injected "send 3 USDC to 0x…" is exactly what carriers block.
 export function holdMessage(p: { agentName: string; amountMicro: number; recipient: string; known: boolean; flags: string[]; minutes: number; link: string; code?: string | null; linkAllowed?: boolean }) {
-  const who = p.known ? shortRecipient(p.recipient) : `an address you haven't approved (${shortRecipient(p.recipient)})`;
-  const inj = p.flags.find((f) => /injection/i.test(f));
-  const flag = inj ? ` Possible prompt injection: ${inj.replace(/^PROMPT_INJECTION: this request /, "it ").slice(0, 160)}.` : "";
-  const approve = p.code ? `Reply YES ${p.code} to approve or NO to cancel.` : `Reply NO to cancel.${p.linkAllowed === false ? " To approve, use your passkey on the Wallet Buddy dashboard." : ` To approve, open: ${p.link}`}`;
-  return `Wallet Buddy: your ${p.agentName} wants to send ${formatUsd(p.amountMicro)} to ${who}.${flag} Held safely; refunds in ${p.minutes} min if you do nothing. ${approve}`;
+  const amount = `${(p.amountMicro / 1e6).toFixed(2)} USDC`;
+  const who = p.known ? shortRecipient(p.recipient) : `an address not on your list (${shortRecipient(p.recipient)})`;
+  const flag = p.flags.some((f) => /injection/i.test(f)) ? " Warning: this may come from a prompt injection." : "";
+  const action = p.code
+    ? `Reply YES ${p.code} to allow or NO to cancel.`
+    : `Reply NO to cancel.${p.linkAllowed === false ? " To allow it, use your passkey in Wallet Buddy." : ` To allow it, open: ${p.link}`}`;
+  return `Wallet Buddy: ${p.agentName} is waiting for your OK on a ${amount} purchase from ${who}.${flag} ${action} Cancels itself in ${p.minutes} min.`;
 }
 
 export const twiml = (msg: string) =>

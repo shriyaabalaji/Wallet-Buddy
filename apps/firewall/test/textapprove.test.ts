@@ -32,7 +32,7 @@ const hold = async (id: string, amountMicro: number) => {
   expect(d.json.outcome).toBe("hold");
   for (let i = 0; i < 50; i++) {
     const sms = db.prepare("SELECT body FROM sms_log WHERE direction='out' ORDER BY id DESC LIMIT 1").get() as any;
-    if (sms && sms.body.includes(`$${(amountMicro / 1e6).toFixed(2)}`)) return sms.body as string;
+    if (sms && sms.body.includes(`${(amountMicro / 1e6).toFixed(2)} USDC`)) return sms.body as string;
     await new Promise((r) => setTimeout(r, 10));
   }
   throw new Error("no hold text");
@@ -54,10 +54,11 @@ describe("approve by text", () => {
   it("the hold text carries a 6-digit code; YES <code> from the owner approves exactly that payment", async () => {
     const body = await hold("h1", 500_000);
     const code = /YES (\d{6})/.exec(body)![1]!;
-    expect(body).toMatch(/Reply YES \d{6} to approve or NO to cancel\./);
+    expect(body).toMatch(/Reply YES \d{6} to allow or NO to cancel\./);
+    expect(body).not.toMatch(/\$|send|refund/i); // carrier-filter triggers (see sms.ts)
     expect(await reply("+15550000000", `YES ${code}`)).toMatch(/don't|Nothing|recognize|match/); // stranger: refused
     expect(statusOf("h1")).toBe("held");
-    expect(await reply(OWNER_PHONE, `yes ${code}`)).toMatch(/Approved \$0\.50/);
+    expect(await reply(OWNER_PHONE, `yes ${code}`)).toMatch(/Allowed: 0\.50 USDC/);
     expect(statusOf("h1")).toBe("approved");
     expect((db.prepare("SELECT approved_via FROM holds WHERE request_id='h1'").get() as any).approved_via).toBe("text");
     expect(await reply(OWNER_PHONE, `YES ${code}`)).toMatch(/Nothing is waiting|doesn't match/); // can't reuse

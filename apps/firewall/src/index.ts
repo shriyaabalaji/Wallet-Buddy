@@ -4,7 +4,7 @@ import { createApp, flushDecisionsToArc, paymentsInFlight } from "./server";
 import { expireHolds } from "./approvals";
 import { releaseStaleReservations } from "./engine";
 import { arcStatus } from "./arc";
-import { smsConfigured } from "./sms";
+import { smsProvider } from "./sms";
 import { sweepBuyerWallet, topUpGateway } from "./funding";
 import { authConfig, authSummary } from "./auth";
 import { indexChain } from "./proof";
@@ -12,7 +12,7 @@ import { indexChain } from "./proof";
 const db = openDb(config.dbPath);
 createApp(db).listen(config.port, () => {
   console.log(`Agent Firewall listening on http://localhost:${config.port}`);
-  console.log(`  db=${config.dbPath} arc=${JSON.stringify(arcStatus())} sms=${smsConfigured() ? "twilio" : "dry-run (console)"} llm=${config.llmApiKey ? "claude" : "offline parser"}`);
+  console.log(`  db=${config.dbPath} arc=${JSON.stringify(arcStatus())} sms=${smsProvider()} llm=${config.llmApiKey ? "claude" : "offline parser"}`);
   const a = authSummary(authConfig);
   console.log(`  auth: owner=${a.owner ? "on" : "NOT CONFIGURED (owner routes return 503)"} agents=[${a.agents.join(", ") || "none"}] service=${a.service ? "on" : "off"}`);
   for (const p of authConfig.problems) console.warn(`  [auth] ${p}`);

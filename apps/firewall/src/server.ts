@@ -393,7 +393,8 @@ route("POST", "/v1/payments/evaluate", "agent", async ({ db, body, who }) => {
     if (flag) {
       res.decision.flags = [...(res.decision.flags ?? []), flag];
       db.prepare("UPDATE requests SET flags_json=? WHERE request_id=?").run(JSON.stringify(res.decision.flags), req.requestId);
-      if (res.decision.outcome === "block") void alertOwner(db, `Wallet Buddy blocked ${req.agentId}: ${formatUsd(req.amountMicro)} to ${shortRecipient(req.recipient)}. ${flag.replace(/^PROMPT_INJECTION: /, "Possible prompt injection: ")} Rule: ${res.decision.reason}`);
+      // Carrier-safe wording (see holdMessage in sms.ts): no "$", no quoted seller text. Full details are in the log.
+      if (res.decision.outcome === "block") void alertOwner(db, `Wallet Buddy stopped ${req.agentId} from paying ${(req.amountMicro / 1e6).toFixed(2)} USDC to ${shortRecipient(req.recipient)}. It looks like a prompt injection in data from ${flag.match(/(\w+)(?:'s)? response/)?.[1] ?? "a seller"}. Nothing was paid. Reason: ${res.decision.reason}`);
     }
   }
   // A replayed requestId returns the stored decision; don't hand another agent's decision back.

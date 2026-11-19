@@ -32,6 +32,13 @@ export const config = {
     from: env("TWILIO_FROM"),
     ownerPhone: env("OWNER_PHONE"),
   },
+  // Textbelt (textbelt.com): real SMS to US numbers without 10DLC/toll-free registration. Used when TEXTBELT_KEY is set.
+  // Replies need a paid key and a public https FIREWALL_PUBLIC_URL; links in texts need the key whitelisted
+  // (textbelt.com/whitelist), signalled with TEXTBELT_URLS=1.
+  textbelt: {
+    key: env("TEXTBELT_KEY"),
+    urlsAllowed: env("TEXTBELT_URLS") === "1",
+  },
   llmApiKey: env("LLM_API_KEY") ?? env("ANTHROPIC_API_KEY"),
   webauthn: {
     rpId: env("WEBAUTHN_RP_ID") ?? new URL(env("APP_BASE_URL") ?? "http://localhost:3000").hostname,

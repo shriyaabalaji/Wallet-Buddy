@@ -17,10 +17,12 @@ import {
   onHold,
   pendingHolds,
   allPendingHolds,
+  approveByText,
+  denyByTextCode,
   registerPasskey,
   registrationOptions,
 } from "./approvals";
-import { sendSms, smsConfigured, twiml, validTwilioSignature } from "./sms";
+import { sendSms, smsConfigured, smsProvider, twiml, validTextbeltSignature, validTwilioSignature } from "./sms";
 import { SignError, signForRequest } from "./signer";
 import { PAY_NETWORK, PayError, network, payWithCircle, payerAddress, paymentMode } from "./payer";
 import { authConfig, authenticate, authSummary, issueAgentKey, withIssuedKeys, type AuthConfig, type Principal } from "./auth";
@@ -270,12 +272,18 @@ route("POST", "/v1/agents/:agentId/notify", "owner", ({ db, params, body }) => {
 });
 
 // Owner-wide settings: the phone that gets texts for every agent (a per-agent number overrides it).
-route("GET", "/v1/settings", "owner", ({ db }) => ({ ...getOwnerSettings(db), twilio: smsConfigured(), envPhoneSet: Boolean(config.twilio.ownerPhone) }));
+route("GET", "/v1/settings", "owner", ({ db }) => ({ ...getOwnerSettings(db), twilio: smsConfigured(), sms: smsProvider(), envPhoneSet: Boolean(config.twilio.ownerPhone) }));
 route("POST", "/v1/settings", "owner", ({ db, body }) => {
   const raw = typeof body?.phone === "string" ? body.phone.trim() : "";
   if (raw && !/^\+[1-9]\d{7,14}$/.test(raw)) throw new HttpError(400, "Phone must be in international format, like +16045550100.");
-  const events = Array.isArray(body?.events) ? NOTIFY_EVENTS.filter((e) => body.events.includes(e)) : (["hold"] as NotifyEvent[]);
-  setOwnerSettings(db, { phone: raw || null, events });
+  const events = Array.isArray(body?.events) ? NOTIFY_EVENTS.filter((e) => body.events.includes(e)) : undefined;
+  let textApprove: { enabled: boolean; maxMicro: number } | undefined;
+  if (body?.textApprove) {
+    const max = Number(body.textApprove.maxMicro);
+    if (!Number.isInteger(max) || max < 0 || max > 100_000_000) throw new HttpError(400, "Text-approval limit must be between $0 and $100.");
+    textApprove = { enabled: Boolean(body.textApprove.enabled), maxMicro: max };
+  }
+  setOwnerSettings(db, { ...(typeof body?.phone === "string" ? { phone: raw || null } : {}), events, textApprove });
   return getOwnerSettings(db);
 });
 // Every agent's held payments, for the global Overview.
@@ -545,26 +553,43 @@ route("POST", "/v1/twilio/inbound", "webhook", async ({ db, req, raw }) => {
   const params = Object.fromEntries(new URLSearchParams(raw)) as Record<string, string>;
   const url = config.publicUrl + (req.url ?? "");
   if (!validTwilioSignature(req.headers["x-twilio-signature"] as string | undefined, url, params)) throw new HttpError(403, "bad signature");
-  const from = params.From ?? "";
-  const text = (params.Body ?? "").trim().toUpperCase();
-  db.prepare("INSERT INTO sms_log (direction, phone, body, at) VALUES ('in', ?, ?, ?)").run(from, params.Body ?? "", new Date().toISOString());
-  let reply: string;
+  return { __twiml: twiml(await handleOwnerText(db, params.From ?? "", params.Body ?? "")) };
+});
+
+// Textbelt replies (JSON, signed with the API key). The answer goes back as a new text.
+route("POST", "/v1/sms/textbelt", "webhook", async ({ db, req, raw }) => {
+  if (!validTextbeltSignature(req.headers["x-textbelt-signature"] as string | undefined, req.headers["x-textbelt-timestamp"] as string | undefined, raw)) throw new HttpError(403, "bad signature");
+  let body: { fromNumber?: string; text?: string };
+  try { body = JSON.parse(raw); } catch { throw new HttpError(400, "invalid JSON"); }
+  const from = body.fromNumber ?? "";
+  const reply = await handleOwnerText(db, from, body.text ?? "");
+  if (from) void sendSms(db, from, reply).catch((e) => console.error("[sms reply]", e));
+  return { ok: true };
+});
+
+/** One handler for owner replies from any provider. Returns the reply text. */
+async function handleOwnerText(db: DB, from: string, raw: string): Promise<string> {
+  db.prepare("INSERT INTO sms_log (direction, phone, body, at) VALUES ('in', ?, ?, ?)").run(from, raw, new Date().toISOString());
+  const text = raw.trim().toUpperCase();
+  const code = /\b(\d{6})\b/.exec(text)?.[1];
+  if (/^(YES|Y|APPROVE|OK)\b/.test(text)) {
+    if (!code) return "To approve, reply YES followed by the 6-digit code from our text, or use your passkey on the dashboard.";
+    return (await approveByText(db, from, code)).message;
+  }
   if (/^(NO|N|STOP PAYMENT|CANCEL)\b/.test(text)) {
+    if (code) return (await denyByTextCode(db, from, code)) ? "Cancelled. The money is going back to your wallet." : "That code doesn't match a waiting payment.";
     const r = await denyLatestByPhone(db, from);
-    reply = r.ok ? `Cancelled ${r.count === 1 ? "the payment" : `${r.count} payments`}. The money is going back to your wallet.` : "Nothing is waiting for you right now.";
-  } else if (/^PAUSE\b/.test(text)) {
+    return r.ok ? `Cancelled ${r.count === 1 ? "the payment" : `${r.count} payments`}. The money is going back to your wallet.` : "Nothing is waiting for you right now.";
+  }
+  if (/^PAUSE\b/.test(text)) {
     const ids = isOwnerPhone(db, from)
       ? (db.prepare("SELECT id FROM agents WHERE status='active'").all() as any[]).map((a) => a.id)
       : (db.prepare("SELECT agent_id FROM notify WHERE phone=?").all(from) as any[]).map((a) => a.agent_id);
     ids.forEach((id) => setPaused(db, id, true, "Paused by text message"));
-    reply = ids.length ? "Your agent is paused. It can't spend anything until you resume it." : "We don't recognize this number.";
-  } else if (/^(YES|Y|APPROVE|OK)\b/.test(text)) {
-    reply = "To approve, open the link. Approving needs your passkey.";
-  } else {
-    reply = "Reply NO to cancel a held payment, or PAUSE to stop your agent. To approve, open the link we sent.";
+    return ids.length ? `Paused ${ids.length === 1 ? "your agent" : `${ids.length} agents`}. Nothing can spend until you resume on the dashboard.` : "We don't recognize this number.";
   }
-  return { __twiml: twiml(reply) };
-});
+  return "Reply YES <code> to approve, NO to cancel, or PAUSE to stop your agents.";
+}
 
 // ---------- notifications ----------
 /** Security alerts go to the owner's phone whenever one is set (no opt-in needed). Dry-run logs them without Twilio. */

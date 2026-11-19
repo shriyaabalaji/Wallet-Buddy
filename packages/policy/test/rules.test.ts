@@ -231,7 +231,7 @@ describe("timeWindow", () => {
 
   // BUG (cosmetic, owner-facing): windowLabel() formats hour 24 as "12pm" (noon). validateRules accepts endHour 24,
   // so a 9→24 window is enforced correctly (see above) but explained as "9am–12pm", i.e. "until noon".
-  it.fails("BUG: reason labels endHour 24 as midnight, not '12pm' (noon)", () => {
+  it("reason labels endHour 24 as midnight (12am), not noon", () => {
     expect(ev([r({ startHour: 9, endHour: 24 })], {}, {}, at("2026-11-18T08:00:00Z")).reason).toBe("Outside allowed spending hours (9am–12am UTC).");
   });
 

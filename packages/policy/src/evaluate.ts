@@ -171,7 +171,7 @@ export function inWindow(rule: Extract<Rule, { kind: "timeWindow" }>, now: Date)
 const periodLabel = (p: string) => ({ day: "daily", week: "weekly", month: "monthly" })[p] ?? p;
 
 function windowLabel(r: Extract<Rule, { kind: "timeWindow" }>): string {
-  const h = (n: number) => `${((n + 11) % 12) + 1}${n < 12 ? "am" : "pm"}`;
+  const h = (n: number) => `${((n + 11) % 12) + 1}${n < 12 || n === 24 ? "am" : "pm"}`;
   return `${h(r.startHour)}–${h(r.endHour)} ${r.tz}`;
 }
 

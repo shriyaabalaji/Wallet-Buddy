@@ -146,7 +146,6 @@ export function AddMoney() {
         : !info.enabled ? <p className="muted">{info.reason}</p>
         : (
           <>
-            <p>Move USDC from your MetaMask into the Gateway balance your agents spend from. Your rules still decide what they can spend.</p>
             <div className="facts">
               <div className="kv">
                 <span>Goes to</span>
@@ -171,7 +170,7 @@ export function AddMoney() {
               : !account ? <div><button className="btn" onClick={connect} disabled={busy}>{busy ? "Waiting for MetaMask…" : "Connect MetaMask"}</button></div>
               : !onTarget ? (
                 <div className="stack">
-                  <p className="small">MetaMask is on a different network.</p>
+                  <p className="small muted">MetaMask is on a different network.</p>
                   <div><button className="btn" onClick={switchNetwork} disabled={busy}>{busy ? "Waiting for MetaMask…" : `Switch to ${info.chainName}`}</button></div>
                 </div>
               )
@@ -211,13 +210,10 @@ export function AddMoney() {
             {done && (
               <p className="saved-note" role="status">
                 <Icon name="check" size={16} />Deposited ${formatUsdc(done.micro)}.{" "}
-                <a href={done.url} target="_blank" rel="noreferrer" className="verify">View on Arc</a>
+                <a href={done.url} target="_blank" rel="noreferrer" className="verify">View on Arc</a> It can take a minute to show up.
               </p>
             )}
             {error && <p className="small warn-text" role="alert">{error}</p>}
-            <p className="muted small">
-              Arc charges gas in USDC, so keep a little extra in MetaMask. Circle&apos;s CLI can take a minute to show a new deposit.
-            </p>
           </>
         )}
     </section>

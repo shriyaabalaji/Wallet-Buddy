@@ -124,7 +124,7 @@ export function ConnectCircleWallet() {
   } else if (st.session?.signedIn && !otherEmail) {
     body = (
       <div className="stack">
-        <p className="small">Circle&apos;s CLI on the firewall&apos;s machine is already signed in as <strong>{st.session.email}</strong> on {net}.</p>
+        <p className="small">Signed in to Circle as <strong>{st.session.email}</strong> on {net}.</p>
         <div className="toolbar">
           <button className="btn" disabled={Boolean(busy)} onClick={() => act("connect", "/v1/owner/wallet/connect", {}, () => setDone("Connected. Agents now pay from this wallet."))}>{busy === "connect" ? "Connecting…" : "Use this account"}</button>
           <button className="btn secondary" disabled={Boolean(busy)} onClick={() => setOtherEmail(true)}>Use a different email</button>
@@ -154,15 +154,11 @@ export function ConnectCircleWallet() {
     );
   }
 
-  return (
-    <div className="steps">
-      <h3 className="small-h">{st.connected ? "Circle Agent Wallet" : st.wallet.address ? "Connect a different wallet" : "Connect your Circle Agent Wallet"}</h3>
+  const inner = (
+    <>
       {body}
       {done && <p className="saved-note" role="status"><Icon name="check" size={16} />{done}</p>}
       {err && <p className="small warn-text" role="alert">{err}</p>}
-      {st.wallet.source === "dashboard" && st.wallet.address && (
-        <p className="muted small">Wallet <span className="mono" title={st.wallet.address}>{shortAddr(st.wallet.address)}</span> · Gateway account <span className="mono" title={st.wallet.depositor ?? ""}>{st.wallet.depositor ? shortAddr(st.wallet.depositor) : "unknown"}</span></p>
-      )}
       <details className="advanced">
         <summary>Set it up from a terminal instead</summary>
         <div className="advanced-body">
@@ -175,6 +171,18 @@ export function ConnectCircleWallet() {
           </ol>
         </div>
       </details>
+    </>
+  );
+  // With a wallet already in place, the connect flow is tucked away; without one it's the main thing to do here.
+  return st.wallet.address || st.connected ? (
+    <details className="advanced change-wallet">
+      <summary>{st.connected ? "Manage wallet" : "Change wallet"}</summary>
+      <div className="advanced-body">{inner}</div>
+    </details>
+  ) : (
+    <div className="steps">
+      <h3 className="small-h">Connect your Circle Agent Wallet</h3>
+      {inner}
     </div>
   );
 }

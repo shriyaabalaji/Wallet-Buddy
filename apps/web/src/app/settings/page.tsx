@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { ARC_EXPLORER, ApiError, api, type NotifyEvent } from "@/lib/api";
 import { useAgents } from "@/lib/agents";
 import { usePoll } from "@/lib/hooks";
-import { ErrorState, Icon, cents, shortAddr } from "@/components";
+import { ErrorState, Icon, Money, shortAddr } from "@/components";
 import { PasskeySetup } from "@/passkey";
 import { AddMoney } from "@/deposit";
 import { ConnectCircleWallet } from "@/connect-wallet";
@@ -69,53 +69,64 @@ function TextMessages() {
     try {
       await api("/v1/settings", { method: "POST", body: { phone: normalized, events: EVENTS.filter((e) => events.includes(e)), textApprove: { enabled: textOk, maxMicro: Math.round(cap * 1e6) } } });
       setPhone(formatPhone(normalized));
-      setDone(events.length ? `Saved. Texts go to ${formatPhone(normalized)}.` : "Saved. No texts will be sent.");
+      setDone(events.length ? "Saved" : "Saved. No texts will be sent.");
       await cur.refresh();
     } catch (e) {
       setError(e instanceof ApiError ? e : new ApiError(e instanceof Error ? e.message : "Couldn't save.", 0));
     } finally { setBusy(false); }
   }
 
+  const provider = cur.data?.sms ?? (cur.data?.twilio ? "twilio" : cur.data ? "dry-run" : null);
   return (
     <section className="panel" aria-labelledby="sms">
-      <h2 id="sms">Text messages</h2>
+      <div className="panel-head">
+        <h2 id="sms">Text messages</h2>
+        {provider && (provider === "dry-run"
+          ? <span className="badge warn" title="No SMS provider is set on the firewall, so texts go to its log.">Not sending</span>
+          : <span className="badge ok" title={provider === "textbelt" ? "Sent with Textbelt" : "Sent with Twilio"}>On</span>)}
+      </div>
       {cur.error && !cur.data && <ErrorState error={cur.error} onRetry={cur.refresh} />}
       <div className="field">
-        <label htmlFor="phone">Your phone number</label>
+        <label htmlFor="phone">Phone</label>
         <input
           id="phone" type="tel" autoComplete="tel" inputMode="tel" placeholder="+1 604 555 0100"
           value={phone} onChange={(e) => { setPhone(e.target.value); setPhoneErr(null); setDone(null); }}
-          aria-invalid={phoneErr ? true : undefined} aria-describedby={phoneErr ? "phone-err" : "phone-note"}
+          aria-invalid={phoneErr ? true : undefined} aria-describedby={phoneErr ? "phone-err" : undefined}
         />
         {phoneErr && <p id="phone-err" role="alert" className="field-err">{phoneErr}</p>}
-        <p id="phone-note" className="small muted">One number for every agent.</p>
       </div>
-      <fieldset className="checks">
-        <legend className="muted small">Text me when</legend>
-        {EVENTS.map((e) => (
-          <label key={e} className="check"><input type="checkbox" checked={events.includes(e)} onChange={(ev) => toggle(e, ev.target.checked)} /> {EVENT_LABEL[e]}</label>
-        ))}
+      <fieldset className="chip-set">
+        <legend>Text me when</legend>
+        <div className="chips">
+          {EVENTS.map((e) => (
+            <label key={e} className="chip-toggle"><input type="checkbox" checked={events.includes(e)} onChange={(ev) => toggle(e, ev.target.checked)} /><span>{EVENT_LABEL[e]}</span></label>
+          ))}
+        </div>
       </fieldset>
-      <div className="field">
-        <label className="check"><input type="checkbox" checked={textOk} onChange={(e) => { setTextOk(e.target.checked); setDone(null); }} /> Let me approve by text</label>
+      <div className="switch-row">
+        <label className="switch" htmlFor="text-ok">
+          <span>Approve by text</span>
+          <input id="text-ok" type="checkbox" role="switch" checked={textOk} onChange={(e) => { setTextOk(e.target.checked); setDone(null); }} />
+          <span className="track" aria-hidden="true" />
+        </label>
         {textOk && (
-          <div className="row" style={{ gap: 8, alignItems: "center", justifyContent: "flex-start" }}>
-            <label htmlFor="cap" className="small muted">Up to $</label>
-            <input id="cap" type="number" min={0} max={100} step={0.5} value={capUsd} onChange={(e) => { setCapUsd(e.target.value); setDone(null); }} style={{ width: 90 }} />
-            <span className="small muted">per payment; bigger ones need your passkey</span>
-          </div>
+          <span className="cap" title="Bigger payments need your passkey">
+            <label htmlFor="cap">up to $</label>
+            <input id="cap" type="number" min={0} max={100} step={0.5} value={capUsd} onChange={(e) => { setCapUsd(e.target.value); setDone(null); }} />
+            <span>each</span>
+          </span>
         )}
+      </div>
+      <div className="replies" aria-label="Replies you can text back">
+        {textOk && <span><code>YES 123456</code>approve</span>}
+        <span><code>NO</code>cancel</span>
+        <span><code>PAUSE</code>stop all agents</span>
       </div>
       <div className="toolbar sms-actions">
         <button className="btn" onClick={save} disabled={busy || !loaded || !phone.trim()}>{busy ? "Saving…" : "Save"}</button>
         {done && <span className="saved-note" role="status"><Icon name="check" size={16} />{done}</span>}
       </div>
       {error && <ErrorState error={error} />}
-      <p className="muted small">
-        Each held payment&apos;s text has its own 6-digit code: reply <strong>YES 123456</strong> to approve it{textOk ? "" : " (turned off above)"}, <strong>NO</strong> to cancel, or <strong>PAUSE</strong> to stop all your agents. Only replies from this number count.
-        {cur.data?.sms === "textbelt" && <><br />Texts are sent with Textbelt.</>}
-        {cur.data?.twilio === false && <><br />Texting isn&apos;t set up on the firewall, so texts are written to its log instead of sent.</>}
-      </p>
     </section>
   );
 }
@@ -137,18 +148,21 @@ function Wallet() {
         <h2 id="wallet">Wallet</h2>
         {health && (
           circle && addr
-            ? <span className="badge ok">Circle Agent Wallet connected</span>
+            ? <span className="badge ok">Connected</span>
             : <span className="badge warn">{circle ? "No wallet address" : "Local test key"}</span>
         )}
       </div>
       {!health ? <p className="muted" role="status">Loading…</p> : (
-        <div className="facts">
-          <div className="kv"><span>Address</span>{addr ? <a className="mono" href={`${ARC_EXPLORER}/address/${addr}`} target="_blank" rel="noreferrer" title={addr}>{shortAddr(addr)}</a> : <span>Not set</span>}</div>
-          <div className="kv"><span>Pays with</span><span>{circle ? "Circle Agent Wallet" : "Local key (testnet only)"}</span></div>
-          <div className="kv"><span>Network</span><span>Arc {health.network ?? "testnet"}</span></div>
-          <div className="kv"><span>Gateway balance</span><span>{available !== null ? `${cents(available)} USDC` : readError ? "Couldn't read it" : health.mockPayments ? "Simulated" : "Not set up"}</span></div>
-          {depositor && depositor !== addr && <div className="kv"><span>Gateway depositor</span><a className="mono" href={`${ARC_EXPLORER}/address/${depositor}`} target="_blank" rel="noreferrer" title={depositor}>{shortAddr(depositor)}</a></div>}
-        </div>
+        <>
+          <div className="wallet-balance">
+            {available !== null ? <Money micro={Math.floor(available * 100 + 1e-9) * 10_000} size="xl" /> : <span className="money md">{readError ? "Couldn't read it" : health.mockPayments ? "Simulated" : "Not set up"}</span>}
+            <span className="muted small">{circle ? "Circle Agent Wallet" : "Local key"}, Arc {health.network ?? "testnet"}</span>
+          </div>
+          <div className="facts">
+            <div className="kv"><span>Wallet</span>{addr ? <a className="mono" href={`${ARC_EXPLORER}/address/${addr}`} target="_blank" rel="noreferrer" title={addr}>{shortAddr(addr)}</a> : <span>Not set</span>}</div>
+            {depositor && depositor !== addr && <div className="kv"><span>Gateway account</span><a className="mono" href={`${ARC_EXPLORER}/address/${depositor}`} target="_blank" rel="noreferrer" title={depositor}>{shortAddr(depositor)}</a></div>}
+          </div>
+        </>
       )}
       <ConnectCircleWallet />
     </section>

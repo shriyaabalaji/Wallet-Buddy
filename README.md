@@ -128,6 +128,23 @@ Setting up keys from scratch:
 - `circle wallet list --type agent --chain ARC-TESTNET`
 - `circle gateway balance --address <W> --chain ARC-TESTNET`
 - the address on the Arc explorer
+
+**Mainnet (real USDC), from the dashboard.** Verified on 2026-11-19 with a $0.02 payment. Everything except Circle's email codes happens in the dashboard:
+
+1. `cp .env.firewall.mainnet.example .env.firewall.mainnet && chmod 600 .env.firewall.mainnet`, and set the demo seller's payee to an address you control: `SELLER_ADDRESSES` there, `MAINNET_SELLER_ADDRESS` in `.env.sellers`.
+2. Start the mainnet stack (the network switch is only read from the shell):
+   ```bash
+   NETWORK=mainnet npm run mainnet -w @agent-firewall/sellers    # :4300, payee = your address
+   NETWORK=mainnet npm run dev:firewall                          # :4100, own database
+   FIREWALL_URL=http://localhost:4100 NEXT_PUBLIC_ARC_EXPLORER=https://explorer.arc.io npm run dev:web
+   ```
+3. **Settings → Wallet:** accept Circle's Terms, enter your email, type the code Circle sends. The firewall runs Circle's CLI on its own machine, finds your Agent Wallet and its Gateway account, and pays from it. If `circle` isn't on the firewall's PATH, set `CIRCLE_CLI_BIN`.
+4. **Settings → Add money:** deposit USDC from MetaMask on Arc mainnet (`approve`, then `GatewayWallet.depositFor` to the wallet's Gateway account).
+5. **Agents → Add agent** (`research-agent`, starter rules), then:
+   `FIREWALL_URL=http://localhost:4100 SELLERS_URL=http://localhost:4300 MOCK_PAYMENTS=0 npm run dev:agent -- normal 1`
+6. Recommended: Circle's own cap, which holds even if the firewall host is compromised (email code): `circle wallet limit set --address <W> --chain ARC --policy-type stablecoin --daily 5`.
+
+If the dashboard keeps reloading after you switch it between networks, stop it and delete `apps/web/.next`.
 - the Overview's Balance card
 
 ## Deployed contracts and sample transactions (Arc testnet, chain 5042002)
@@ -180,7 +197,7 @@ Tests (`npm test`, `npm run test:contracts`):
 
 **What's enforced where.**
 - **Testnet:** Wallet Buddy is the only enforcement. Circle's Agent Wallet policies are mainnet-only ("Spending policies require a mainnet agent wallet"; `docs/RESEARCH.md` Q9/Q10). Our outer wall is the treasury topping up the wallet's Gateway balance by at most $5 per UTC day.
-- **Mainnet** (opt-in with `NETWORK=mainnet` in the shell; never read from a file): Circle's policy adds a $5/day cap and an allowlist containing only our seller, and the vault and registry aren't redeployed.
+- **Mainnet** (opt-in with `NETWORK=mainnet` in the shell; never read from a file): payments are verified end to end (2026-11-19). Circle's policy can add a daily cap and a recipient allowlist as the outer wall (`circle wallet limit set`, `HANDOFF.md` §15), but that Circle-side enforcement hasn't been tested yet. The vault and registry aren't redeployed.
 
 | Protection | Enforced by | Trust assumption |
 |---|---|---|
@@ -198,8 +215,8 @@ Tests (`npm test`, `npm run test:contracts`):
 - **Compromised firewall host:** it also holds the treasury and vault-owner keys, so it can spend the treasury and release held funds. Keep the treasury small. This is the main remaining trust assumption; the fix is a passkey-native owner wallet.
 
 **Known gaps (honest):**
-- **Mainnet:** the Circle policy segment is built but has **not run yet**. It's waiting on funding the mainnet wallet. Steps are in `HANDOFF.md` §15.
-- **Sellers:** all ours, disclosed. Arc testnet has no comparable third-party x402 sellers. Their data is real (ESPN's public NBA feeds).
+- **Mainnet:** payments work. On 2026-11-19 a Circle Agent Wallet paid the mainnet demo seller $0.02 in real USDC through the firewall (Gateway balance 1.00 → 0.98; the payee's 0.02 pending Circle's next batch). Not run yet: Circle's own policy checks (daily cap and recipient allowlist; `HANDOFF.md` §15 tests b and c).
+- **Sellers:** all ours, disclosed. Arc has no comparable third-party x402 sellers. The testnet sellers' data is real (ESPN's public NBA feeds); the mainnet demo seller returns placeholder text.
 - **The injection demo's hijack is scripted:** we make the agent obey, to show that the firewall holds even when the agent doesn't. In our runs, the real Claude agent didn't act on injected text.
 - **"Settled" means Circle's CLI paid and the seller delivered.** Gateway settles with sellers in batches and the CLI returns no transaction reference, so we don't claim a per-payment onchain hash. Circle's transfer API reports these `completed`.
 - **Texts:** sent with Textbelt (real US SMS, signed replies) or Twilio; without either they're logged, not sent. Set your number under Settings → Text messages. **Approving by text** (reply `YES <6-digit code>`) is weaker than a passkey (a SIM swap could approve), so it's limited to the owner's number, one code per payment, 5 tries, and a per-payment cap (default $5); bigger payments need the passkey.
@@ -214,7 +231,7 @@ Tests (`npm test`, `npm run test:contracts`):
 | `packages/policy` | Pure rule evaluation (10 kinds), canonical policy hash, plain-English descriptions |
 | `packages/client` | `requestPayment()` for any TypeScript agent |
 | `apps/firewall` | HTTP API (`docs/API.md`), ledger, payer, holds, SMS, passkeys, anomalies, injection scan, optimizer, Arc adapter, proof indexer |
-| `apps/web` | Dashboard: Overview (wallet balance + agent carousel), Agents (per-agent overview + plain-English rules, add agent), Activity (payments + Onchain tab), Settings (phone, wallet, passkey); public `/proof`; `/a/[token]` approve page |
+| `apps/web` | Dashboard: Overview (wallet balance + agent carousel), Agents (per-agent overview + plain-English rules, add agent), Activity (payments + Onchain tab), Settings (phone; wallet: connect a Circle Agent Wallet with an emailed code, no terminal; passkey; Add money: deposit USDC into the agents' Gateway balance from MetaMask); public `/proof`; `/a/[token]` approve page |
 | `apps/agent` | `llm.ts` Claude research agent; `index.ts` scripted phases (normal / race / labelled attack) |
 | `apps/mcp` | MCP server: `pay_with_firewall` |
 | `apps/sellers` | x402 sellers (Circle Gateway middleware) reselling live NBA data; `/catalog` is free |

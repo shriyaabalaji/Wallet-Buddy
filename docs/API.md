@@ -52,6 +52,12 @@ forwarded without the owner token. Every POST must carry a same-site `Origin` (C
 | owner | POST | `/v1/policy` | `{ agentId, rules, notify?: { phone, events: ("hold"\|"budget80"\|"paused")[] }, confirmed: true }` | `{ policy }`; commits hash to Arc PolicyRegistry when configured |
 | owner | POST | `/v1/owner/passkey/options` | | WebAuthn registration options |
 | owner | POST | `/v1/owner/passkey` | `{ response }` | `{ ok }` |
+| owner | GET | `/v1/owner/wallet` | | Circle Agent Wallet connect status: `{ network, chain, paymentMode, wallet: { address, depositor, source: dashboard\|env }, connected, cli: { installed, version }, terms, session, pending }` |
+| owner | POST | `/v1/owner/wallet/terms` | `{ accept: true }` | Accepts Circle's CLI Terms (only with an explicit `true`) → status |
+| owner | POST | `/v1/owner/wallet/code` | `{ email }` | Circle emails a one-time code (`circle wallet login <email> --init`). At most one every 30 s; the CLI's request id stays on the firewall → `{ email, expiresAt }` |
+| owner | POST | `/v1/owner/wallet/verify` | `{ code }` | Completes the login (`--request <id> --otp <code>`; 5 tries, 10 min), finds the Agent Wallet and its Gateway backing EOA, and makes it the payer → status |
+| owner | POST | `/v1/owner/wallet/connect` | | Same, from the CLI's existing session (no code) → status |
+| owner | POST | `/v1/owner/wallet/disconnect` | | Stop paying from the dashboard-connected wallet; back to `.env.firewall`. The CLI stays signed in → status |
 | owner | POST | `/v1/payments/:requestId/reconcile` | `{ outcome: "paid"\|"not_paid", txHash?, note? }` | `{ status }`. Only for uncertain rows (`unconfirmed`, or signed and never reported); 409 otherwise or while a `/pay` is running. `paid` → settled (still counted), `not_paid` → released |
 | link | GET | `/v1/approvals/:token` | | `HeldPayment & { agentName, passkeyReady }` |
 | link | POST | `/v1/approvals/:token/deny` | | `{ status: "denied", refundTx }` |
@@ -100,7 +106,7 @@ approved (released from the vault). It is not an onchain settlement hash. "In pr
 `uncertain` (failed after signing: may have moved money) · `simulated` (settled under `MOCK_PAYMENTS=1`, no money) ·
 `accepted_no_reference` · `accepted_with_reference` (seller's reference, **not** verified onchain by the firewall) ·
 `confirmed_onchain` (vault release the firewall sent and saw succeed) · `approved_unrecorded` · `held` · `not_paid`.
-Only `confirmed_onchain` is verified. `/health` (owner) adds `mockPayments` and `reservationTtlMinutes`.
+Only `confirmed_onchain` is verified. `/health` (owner) adds `mockPayments`, `reservationTtlMinutes` and `deposit`: where an owner deposit from MetaMask goes (`{ enabled: false, reason }`, or `{ enabled: true, network, chainId, chainName, rpcUrls, explorerUrl, usdc, gatewayWallet, depositor, paymentMode }`). `depositor` is the payer's Gateway balance owner: the Agent Wallet's backing EOA (`CIRCLE_GATEWAY_DEPOSITOR`), or the local buyer key. Off under `MOCK_PAYMENTS=1`. The browser signs `USDC.approve(gatewayWallet, amount)` then `GatewayWallet.depositFor(usdc, depositor, amount)`; the firewall never sees the deposit.
 
 **Reservation timeout:** an allowed payment that is never signed or paid gives its budget back after
 `RESERVATION_TTL_MINUTES` (default 15, minimum 5). Anything signed, paid-in-progress (`/pay` running) or uncertain is

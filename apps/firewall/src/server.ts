@@ -7,6 +7,9 @@ import { compileRules } from "./compiler";
 import { defaultSamples, dryRun, type Sample } from "./dryrun";
 import { arcStatus, commitPolicyOnArc, logDecisionsOnArc, vaultFunding } from "./arc";
 import { fundingStatus } from "./funding";
+import { currentDepositInfo, payerGatewayBalance } from "./deposit";
+import { loadConnectedWallet } from "./wallet";
+import { ConnectError, acceptTerms, connectFromSession, disconnect, sendCode, verifyCode, walletStatus } from "./circle-connect";
 import {
   approvalOptions,
   approveWithPasskey,
@@ -195,8 +198,11 @@ route("GET", "/health", "public", async ({ db, who, auth }) => {
     vault = { error: e instanceof Error ? e.message.split("\n")[0]! : "unreadable" };
   }
   const buyer = await fundingStatus(db).catch((e) => ({ enabled: true, error: e instanceof Error ? e.message.split("\n")[0]! : "unreadable" }));
-  return { ok: true, signer: payerAddress(), paymentMode, network, arc: arcStatus(), vault, buyer, twilio: smsConfigured(), llm: Boolean(config.llmApiKey), passkey: hasPasskey(db), auth: authSummary(auth),
-    mockPayments: config.mockPayments, reservationTtlMinutes: config.reservationTtlMinutes };
+  // The payer's Gateway balance however it was funded (top-ups, MetaMask, CLI); null when there's no real payer.
+  const deposit = currentDepositInfo();
+  const gateway = await payerGatewayBalance(deposit);
+  return { ok: true, signer: payerAddress(), paymentMode: paymentMode(), network, arc: arcStatus(), vault, buyer, twilio: smsConfigured(), llm: Boolean(config.llmApiKey), passkey: hasPasskey(db), auth: authSummary(auth),
+    mockPayments: config.mockPayments, reservationTtlMinutes: config.reservationTtlMinutes, deposit, gateway };
 });
 
 route("GET", "/v1/agents/:agentId/summary", "ownerOrAgent", ({ db, params, who }) => {
@@ -249,7 +255,7 @@ route("POST", "/v1/agents", "owner", ({ db, body }) => {
   if (body?.issueKey !== true) return { agent: { id, name, status: "active" }, wallet: null, note: "Registered in the firewall only. No wallet or credential was created." };
   // Website signup: issue the agent's key now (shown once). All agents pay from the one configured payer (the Circle
   // Agent Wallet by default); each agent's own rules and budgets are enforced by the firewall before any payment.
-  return { agent: { id, name, status: "active" }, key: issueAgentKey(db, id), wallet: { address: payerAddress(), mode: paymentMode, shared: true },
+  return { agent: { id, name, status: "active" }, key: issueAgentKey(db, id), wallet: { address: payerAddress(), mode: paymentMode(), shared: true },
     note: "Copy this key now; it won't be shown again. Give it to your agent as FIREWALL_AGENT_TOKEN. It can't pay until you save rules." };
 });
 
@@ -288,6 +294,22 @@ route("POST", "/v1/settings", "owner", ({ db, body }) => {
 });
 // Every agent's held payments, for the global Overview.
 route("GET", "/v1/holds", "owner", ({ db }) => ({ items: allPendingHolds(db) }));
+
+// Connect a Circle Agent Wallet from the dashboard (circle-connect.ts): the firewall drives Circle's CLI on this host.
+const connectErr = (e: unknown): never => {
+  if (e instanceof ConnectError) throw new HttpError(e.status, e.message);
+  throw e;
+};
+route("GET", "/v1/owner/wallet", "owner", () => walletStatus());
+route("POST", "/v1/owner/wallet/terms", "owner", async ({ body }) => {
+  if (body?.accept !== true) throw new HttpError(400, "Accepting Circle's Terms needs an explicit yes.");
+  await acceptTerms().catch(connectErr);
+  return walletStatus();
+});
+route("POST", "/v1/owner/wallet/code", "owner", ({ body }) => sendCode(body?.email).catch(connectErr));
+route("POST", "/v1/owner/wallet/verify", "owner", ({ db, body }) => verifyCode(db, body?.code).catch(connectErr));
+route("POST", "/v1/owner/wallet/connect", "owner", ({ db }) => connectFromSession(db).catch(connectErr));
+route("POST", "/v1/owner/wallet/disconnect", "owner", ({ db }) => disconnect(db));
 
 route("POST", "/v1/agents/:agentId/pause", "owner", async ({ db, params, body }) => {
   requireAgent(db, params.agentId!);
@@ -445,7 +467,7 @@ route("GET", "/v1/notifications", "owner", ({ db, query }) => ({
   items: (db.prepare("SELECT direction, phone, body, at FROM sms_log ORDER BY id DESC LIMIT ?").all(Math.min(Number(query.get("limit") ?? 10) || 10, 50)) as any[])
     .map((r) => ({ ...r, phone: r.phone ? `…${String(r.phone).slice(-4)}` : null })),
 }));
-route("GET", "/v1/signer", "public", () => ({ address: payerAddress(), mode: paymentMode, network: PAY_NETWORK, arcNetwork: network }));
+route("GET", "/v1/signer", "public", () => ({ address: payerAddress(), mode: paymentMode(), network: PAY_NETWORK, arcNetwork: network }));
 /**
  * Request ids a /pay call is working on. payWithCircle awaits the seller probe before it claims signed_ms, so the
  * reservation timeout and owner reconciliation skip these (engine.releaseStaleReservations / reconcilePayment).
@@ -471,6 +493,9 @@ route("POST", "/v1/payments/:requestId/pay", "agent", async ({ db, params, body,
 route("POST", "/v1/payments/:requestId/sign", "agent", async ({ db, params, body, who }) => {
   assertOwnsRequest(db, who, params.requestId!);
   assertAgentActive(db, params.requestId!);
+  // A Circle Agent Wallet pays through /pay; the local buyer key must not also sign for it (e.g. after the owner
+  // connects a wallet from the dashboard while BUYER_PRIVATE_KEY is still set).
+  if (paymentMode() !== "local-key") throw new HttpError(403, "This firewall pays from its Circle Agent Wallet; use /pay.");
   try {
     return { signature: await signForRequest(db, params.requestId!, body?.typedData) };
   } catch (e) {
@@ -484,7 +509,7 @@ route("POST", "/v1/payments/:requestId/sign", "agent", async ({ db, params, body
 // while /pay awaits the seller probe releases the reservation, the payment still goes through, and the spend
 // stops counting. So in that mode only the service token may report.
 function assertMayReport(db: DB, who: Principal | null, requestId: string) {
-  if (paymentMode === "circle-agent-wallet" && who?.kind !== "service") throw new HttpError(403, "The firewall records payment outcomes itself in circle-agent-wallet mode.");
+  if (paymentMode() === "circle-agent-wallet" && who?.kind !== "service") throw new HttpError(403, "The firewall records payment outcomes itself in circle-agent-wallet mode.");
   assertOwnsRequest(db, who, requestId);
 }
 route("POST", "/v1/payments/:requestId/settled", "settlement", ({ db, params, body, who }) => {
@@ -654,6 +679,7 @@ function cors(res: ServerResponse) {
 }
 
 export function createApp(db: DB, auth: AuthConfig = authConfig) {
+  loadConnectedWallet(db);
   // Last-resort guard: any error escaping the handler (e.g. the client aborting mid-body) must not crash the firewall.
   return createServer((req, res) =>
     void handle(db, auth, req, res).catch((e) => {

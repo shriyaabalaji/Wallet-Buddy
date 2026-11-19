@@ -24,6 +24,8 @@ const ROUTES: [method: string, path: RegExp, access: Access][] = [
   ["GET", /^\/v1\/policy\/[^/]+$/, "owner"],
   ["POST", /^\/v1\/policy$/, "owner"],
   ["POST", /^\/v1\/owner\/passkey(\/options)?$/, "owner"],
+  ["GET", /^\/v1\/owner\/wallet$/, "owner"], // connect a Circle Agent Wallet (Settings → Wallet)
+  ["POST", /^\/v1\/owner\/wallet\/(terms|code|verify|connect|disconnect)$/, "owner"],
   ["POST", /^\/v1\/payments\/[^/]+\/reconcile$/, "owner"],
   ["POST", /^\/v1\/optimizer\/recommend$/, "owner"],
   ["GET", /^\/v1\/optimizer\/recommendations$/, "owner"],

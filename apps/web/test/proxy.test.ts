@@ -92,6 +92,25 @@ describe("proxy: owner routes", () => {
     expect(classify("GET", segs("/v1/settings/phone"))).toBeNull();
   });
 
+  it("forwards the Circle wallet connect routes as owner routes only, never cross-site", async () => {
+    const cases = [["GET", "/v1/owner/wallet"], ...["terms", "code", "verify", "connect", "disconnect"].map((v) => ["POST", `/v1/owner/wallet/${v}`])] as const;
+    for (const [m, p] of cases) {
+      expect(classify(m, segs(p)), `${m} ${p}`).toEqual({ path: p, access: "owner" });
+      const f = fakeFirewall();
+      const body = m === "POST" ? "{}" : undefined;
+      expect((await proxy(req(m, `/api/fw${p}`, { body }), segs(p), env, f)).status, `${m} ${p} without session`).toBe(401);
+      expect((await proxy(req(m, `/api/fw${p}`, { cookie: createSession(env), body }), segs(p), env, f)).status, `${m} ${p}`).toBe(200);
+      expect((calls.at(-1)!.init.headers as Record<string, string>).Authorization).toBe(`Bearer ${OWNER_TOKEN}`);
+    }
+    const f = fakeFirewall();
+    const before = calls.length;
+    expect((await proxy(req("POST", "/api/fw/v1/owner/wallet/verify", { cookie: createSession(env), origin: "http://evil.test", body: '{"code":"123456"}' }), segs("/v1/owner/wallet/verify"), env, f)).status).toBe(403);
+    expect(calls.length).toBe(before);
+    expect(classify("POST", segs("/v1/owner/wallet"))).toBeNull();
+    expect(classify("GET", segs("/v1/owner/wallet/code"))).toBeNull();
+    expect(classify("POST", segs("/v1/owner/wallet/logout"))).toBeNull();
+  });
+
   it("fails closed when the dashboard has no owner token configured", async () => {
     const f = fakeFirewall();
     const r = await proxy(req("GET", "/api/fw/health", { cookie: createSession(env) }), ["health"], { ...env, FIREWALL_OWNER_TOKEN: "" }, f);

@@ -31,6 +31,7 @@ function ShellFrame({ path, children }: { path: string; children: ReactNode }) {
   const { agents, health, agentsError } = useAgents();
   const waiting = (agents ?? []).reduce((n, a) => n + a.pendingApprovals, 0);
   const live = Boolean(health?.arc?.registry);
+  const mainnet = health?.network === "mainnet";
   const online = Boolean(health) && !agentsError;
   async function signOut() {
     await fetch("/api/session", { method: "DELETE" }).catch(() => null);
@@ -51,8 +52,8 @@ function ShellFrame({ path, children }: { path: string; children: ReactNode }) {
           ))}
         </nav>
         <div className="side-foot">
-          <span className="status"><span className={`dot ${online ? "" : "paused"}`} aria-hidden="true" />{online ? (live ? "Arc testnet" : "Local mode") : "Wallet Buddy offline"}</span>
-          <span className="muted mono">Chain 5042002 · USDC</span>
+          <span className="status"><span className={`dot ${online ? "" : "paused"}`} aria-hidden="true" />{online ? (mainnet ? "Arc mainnet" : live ? "Arc testnet" : "Local mode") : "Wallet Buddy offline"}</span>
+          <span className="muted mono">Chain {mainnet ? 5042 : 5042002} · USDC</span>
           <button className="linkish" onClick={signOut}>Sign out</button>
         </div>
       </aside>
@@ -232,7 +233,11 @@ export function BalanceCard({ health }: { health: Health | null }) {
   const buyer = health?.buyer;
   const vault = health?.vault;
   const live = buyer && "gatewayAvailableUsdc" in buyer ? buyer : null;
-  const addr = live?.payer ?? health?.signer ?? null;
+  // Without automatic top-ups (no treasury key), the firewall still reads the payer's balance from Circle.
+  const gw = health?.gateway && "availableUsdc" in health.gateway ? health.gateway : null;
+  const available = live?.gatewayAvailableUsdc ?? gw?.availableUsdc ?? null;
+  const readError = (buyer && "error" in buyer) || (health?.gateway && "error" in health.gateway);
+  const addr = live?.payer ?? gw?.depositor ?? health?.signer ?? null;
   const treasury = vault && "treasuryUsdc" in vault ? vault : null;
   const topUpLeft = live ? Math.max(0, live.dailyCapUsdc - live.depositedTodayUsdc) : null;
   return (
@@ -240,15 +245,19 @@ export function BalanceCard({ health }: { health: Health | null }) {
       <div className="row1"><h2>Balance</h2><span className="k">USDC · Arc {health?.network ?? "testnet"}</span></div>
       {!health ? (
         <p className="k" role="status">Loading…</p>
-      ) : live ? (
+      ) : available !== null ? (
         <div>
-          <Money micro={centsMicro(live.gatewayAvailableUsdc)} size="xl" />
+          <Money micro={centsMicro(available)} size="xl" />
           <span className="k under">In Circle Gateway, shared by all your agents</span>
         </div>
       ) : (
         <div>
           <span className="money md">Balance unavailable</span>
-          <span className="k under">{buyer && "error" in buyer ? "Couldn't read the Gateway balance." : "Gateway funding isn't set up on this firewall."}</span>
+          <span className="k under">
+            {health.mockPayments ? "Payments are simulated on this firewall, so there's no real balance."
+              : readError ? "Couldn't read the Gateway balance."
+              : "Set up the wallet in Settings to see its balance."}
+          </span>
         </div>
       )}
       <div className="row3">

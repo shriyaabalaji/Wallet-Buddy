@@ -350,6 +350,10 @@ circle wallet limit --address $W --chain ARC        # verify both rules
 ```
 Then put `W` in `.env.firewall.mainnet` as `CIRCLE_AGENT_WALLET_ADDRESS`.
 
+**Or from the dashboard (2026-11-19):** Settings → Wallet runs the same login non-interactively on the firewall host (`circle wallet login <email> --init`, then `--request <id> --otp <code>` with the code the owner types), finds `W` and its backing EOA, and stores them in `owner_settings` (`apps/firewall/src/wallet.ts`, `circle-connect.ts`). That overrides `CIRCLE_AGENT_WALLET_ADDRESS`/`CIRCLE_GATEWAY_DEPOSITOR` until the owner disconnects. Settings → Add money funds the Gateway account from MetaMask (`depositFor`).
+
+Gotcha: `.env.firewall.mainnet` only overrides `.env.firewall`. If `.env.firewall` is a local demo setup (`PAYMENT_MODE=local-key`, `MOCK_PAYMENTS=1`), the mainnet file must set `PAYMENT_MODE=circle-agent-wallet` and `MOCK_PAYMENTS=0` (the example now does), or the firewall refuses to start / labels real payments "simulated".
+
 **Run:**
 - Mainnet seller: `NETWORK=mainnet npm run mainnet -w @agent-firewall/sellers` (port 4300).
 - Mainnet firewall: `NETWORK=mainnet npm start -w @agent-firewall/firewall` (port 4100, own DB; refuses `local-key`).
@@ -360,7 +364,7 @@ The demo seller's payee is the treasury address, so test payments are recoverabl
 **Tests:**
 | Test | How |
 |---|---|
-| (a) $0.02 succeeds | Agent `normal 1` against the mainnet stack |
+| (a) $0.02 succeeds | Agent `normal 1` against the mainnet stack. **Passed 2026-11-19:** Gateway balance 1.00 → 0.98 USDC, payee 0.02 `pendingBatch` (Circle Gateway API), activity `settled` ("Seller accepted, no transaction reference"); seller's 402 was `eip155:5042`, `GatewayWalletBatched`, amount 20000 |
 | (b) Firewall allows $6, Circle refuses | Set agent rules with no approval threshold and a task budget ≥ $6, then buy `/sportsfeed/bulk`. Expect activity "Blocked $6.00 … Circle wallet policy" |
 | (c) Transfer to a non-allowlisted address is refused by Circle | `circle wallet transfer 0x6e6C13010e65f070876Ec1C5aa59fB07B147b4e7 --amount 0.01 --token 0x3600000000000000000000000000000000000000 --address $W --chain ARC` (that is the owner address; we hold its key, so it's recoverable if Circle lets it through) |
 | (c2) x402 to a non-allowlisted payee | Same as (a), with the mainnet seller's `MAINNET_SELLER_ADDRESS` set to the owner address and the firewall's `SELLER_ADDRESSES` set to match |

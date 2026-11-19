@@ -15,14 +15,14 @@ import { resolveRecipient } from "./arc";
 import { markFailed, markSettled } from "./engine";
 import { signerAddress } from "./signer";
 import { recordSellerResponse } from "./injection";
+import { circleWallet, envPaymentMode, paymentMode, type PaymentMode } from "./wallet";
 
-export type PaymentMode = "local-key" | "circle-agent-wallet";
-/** Circle Agent Wallet is the default; PAYMENT_MODE=local-key is the one-variable fallback (testnet only). */
-export const paymentMode: PaymentMode = process.env.PAYMENT_MODE === "local-key" ? "local-key" : "circle-agent-wallet";
-if (network === "mainnet" && paymentMode === "local-key") throw new Error("PAYMENT_MODE=local-key is testnet-only. Mainnet pays from a Circle Agent Wallet.");
+// Circle Agent Wallet is the default; PAYMENT_MODE=local-key is the one-variable fallback (testnet only). The mode in
+// force can change at runtime when the owner connects a Circle Agent Wallet from the dashboard (wallet.ts).
+export { paymentMode, type PaymentMode };
+if (network === "mainnet" && envPaymentMode === "local-key") throw new Error("PAYMENT_MODE=local-key is testnet-only. Mainnet pays from a Circle Agent Wallet.");
 
 const CIRCLE_BIN = process.env.CIRCLE_CLI_BIN ?? "circle";
-const CIRCLE_WALLET = process.env.CIRCLE_AGENT_WALLET_ADDRESS ?? "";
 const CIRCLE_CHAIN = process.env.CIRCLE_CHAIN ?? (network === "mainnet" ? "ARC" : "ARC-TESTNET");
 /** CAIP-2 network of the seller's Gateway option. Arc mainnet = eip155:5042 (x402-batching 3.5.0). */
 export const PAY_NETWORK = process.env.PAY_NETWORK ?? (network === "mainnet" ? "eip155:5042" : "eip155:5042002");
@@ -30,8 +30,8 @@ export const PAY_NETWORK = process.env.PAY_NETWORK ?? (network === "mainnet" ? "
 const PAY_URL_PREFIXES = (process.env.PAY_URL_PREFIXES ?? process.env.SELLERS_URL ?? "http://localhost:4200").split(",").map((s) => s.trim()).filter(Boolean);
 
 export { network };
-export const circleWalletAddress = () => (isAddress(CIRCLE_WALLET) ? getAddress(CIRCLE_WALLET) : null);
-export const payerAddress = () => (paymentMode === "circle-agent-wallet" ? CIRCLE_WALLET || null : signerAddress());
+export const circleWalletAddress = () => circleWallet().address;
+export const payerAddress = () => (paymentMode() === "circle-agent-wallet" ? circleWallet().address : signerAddress());
 
 export class PayError extends Error {
   constructor(message: string, readonly circlePolicy = false) {
@@ -42,6 +42,8 @@ export class PayError extends Error {
 // Circle's rejection wording isn't documented; anything that reads like a policy refusal is labelled as one,
 // and the raw CLI message is always kept next to it.
 const POLICY_HINT = /polic|limit|allowlist|blocklist|not allowed|exceed|budget|denied|forbidden/i;
+
+export const CIRCLE_CLI_BIN = CIRCLE_BIN;
 
 function runCircle(args: string[], timeoutMs = 90_000): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -69,8 +71,9 @@ async function checkSellerTerms(url: string, expectedTo: string, amountMicro: bi
 
 /** CircleAgentWalletPayer: pay an allowed, reserved request and return the seller's response body. */
 export async function payWithCircle(db: DB, requestId: string, url: string): Promise<{ body: string; warning?: string }> {
-  if (paymentMode !== "circle-agent-wallet") throw new PayError("This firewall signs payments (PAYMENT_MODE=local-key); use /sign.");
-  if (!isAddress(CIRCLE_WALLET)) throw new PayError("CIRCLE_AGENT_WALLET_ADDRESS is not set.");
+  if (paymentMode() !== "circle-agent-wallet") throw new PayError("This firewall signs payments (PAYMENT_MODE=local-key); use /sign.");
+  const wallet = circleWallet().address;
+  if (!wallet) throw new PayError("No Circle Agent Wallet is connected (Settings → Wallet, or CIRCLE_AGENT_WALLET_ADDRESS).");
   if (!PAY_URL_PREFIXES.some((p) => url.startsWith(p))) throw new PayError("That URL isn't one of the configured sellers.");
 
   const row = db.prepare("SELECT * FROM requests WHERE request_id=?").get(requestId) as any;
@@ -95,7 +98,7 @@ export async function payWithCircle(db: DB, requestId: string, url: string): Pro
 
   const maxUsd = (Number(row.amount_micro) / 1e6).toFixed(6);
   try {
-    const body = await runCircle(["services", "pay", url, "--address", CIRCLE_WALLET, "--chain", CIRCLE_CHAIN, "--max-amount", maxUsd, "-q"]);
+    const body = await runCircle(["services", "pay", url, "--address", wallet, "--chain", CIRCLE_CHAIN, "--max-amount", maxUsd, "-q"]);
     markSettled(db, requestId);
     // The firewall sees the seller's response before the agent does: record any payment instructions hidden in it.
     const injection = recordSellerResponse(db, row.agent_id, requestId, row.recipient, body);

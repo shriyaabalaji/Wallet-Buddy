@@ -219,7 +219,7 @@ Tests (`npm test`, `npm run test:contracts`):
 - **Sellers:** all ours, disclosed. Arc has no comparable third-party x402 sellers. The testnet sellers' data is real (ESPN's public NBA feeds); the mainnet demo seller returns placeholder text.
 - **The injection demo's hijack is scripted:** we make the agent obey, to show that the firewall holds even when the agent doesn't. In our runs, the real Claude agent didn't act on injected text.
 - **"Settled" means Circle's CLI paid and the seller delivered.** Gateway settles with sellers in batches and the CLI returns no transaction reference, so we don't claim a per-payment onchain hash. Circle's transfer API reports these `completed`.
-- **Texts are dry-run** (logged, not sent) until Twilio is configured. Set the phone number under Settings → Text messages.
+- **Texts:** sent with Textbelt (real US SMS, signed replies) or Twilio; without either they're logged, not sent. Set your number under Settings → Text messages. **Approving by text** (reply `YES <6-digit code>`) is weaker than a passkey (a SIM swap could approve), so it's limited to the owner's number, one code per payment, 5 tries, and a per-payment cap (default $5); bigger payments need the passkey.
 - **Passkey approval** was verified live; after the database reset on 2026-11-17 the owner must enroll again.
 - **Optimizer requests aren't rate-limited.** The optimizer API exists, but the dashboard no longer shows it.
 - **Dependencies:** `npm audit --omit=dev` reports 4 high-severity advisories in an old `zod` nested inside Circle's `@x402/*` packages. We haven't forced an upgrade of Circle's dependencies.

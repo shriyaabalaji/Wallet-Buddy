@@ -63,8 +63,9 @@ describe("flagging", () => {
     expect(JSON.parse((db.prepare("SELECT flags_json FROM requests WHERE request_id='hijack'").get() as any).flags_json)).toContain(flag);
     await new Promise((r) => setTimeout(r, 50));
     const sms = db.prepare("SELECT body FROM sms_log ORDER BY id DESC LIMIT 1").get() as any;
-    expect(sms.body).toMatch(/Possible prompt injection/);
+    expect(sms.body).toMatch(/prompt injection in data from sportsfeed\. Nothing was paid\./);
     expect(sms.body).toContain("isn't on your approved list");
+    expect(sms.body).not.toMatch(/\$|send \d/i); // carrier-safe: no "$", no quoted "send 3 USDC to …"
   });
   it("other agents aren't tainted, and the taint expires", () => {
     expect(injectionFlag(db, "race-agent", ATTACKER)).toBeNull();

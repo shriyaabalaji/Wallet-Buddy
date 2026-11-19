@@ -1,6 +1,8 @@
 // Hold lifecycle: hold → (deny | approve-with-passkey | expire → refund).
 // Denying is always safe (SMS "NO" works). Releasing money requires a verified passkey.
-import { contactFor, isOwnerPhone } from "./settings";
+import { contactFor, getOwnerSettings, isOwnerPhone } from "./settings";
+import { createHash, randomInt, timingSafeEqual } from "node:crypto";
+import { shortRecipient } from "@agent-firewall/policy";
 import {
   generateAuthenticationOptions,
   generateRegistrationOptions,
@@ -11,7 +13,7 @@ import { config, explorerTx } from "./config";
 import { immediate, type DB } from "./db";
 import { hashToken } from "./engine";
 import { arcStatus, vaultApprove, vaultDeny, vaultHold, vaultRefundExpired } from "./arc";
-import { holdMessage, sendSms } from "./sms";
+import { holdMessage, sendSms, smsLinksAllowed } from "./sms";
 import { activePolicy } from "./engine";
 
 export interface HeldView {
@@ -70,6 +72,14 @@ export function holdByToken(db: DB, token: string): HeldView | null {
   return row ? view(row, false) : null;
 }
 
+function ensureTextCols(db: DB) {
+  try { db.exec("ALTER TABLE holds ADD COLUMN text_code_hash TEXT"); } catch { /* already there */ }
+  try { db.exec("ALTER TABLE holds ADD COLUMN text_attempts INTEGER NOT NULL DEFAULT 0"); } catch { /* already there */ }
+  try { db.exec("ALTER TABLE holds ADD COLUMN approved_via TEXT"); } catch { /* already there */ }
+}
+const MAX_TEXT_ATTEMPTS = 5;
+const codeHash = (requestId: string, code: string) => createHash("sha256").update(`${requestId}:${code}`).digest("hex");
+
 /** Side effects after a hold decision: escrow on Arc + text the owner. Errors are logged, never thrown to the agent. */
 export async function onHold(db: DB, requestId: string, token: string, expiresAt: string) {
   const row = db.prepare(`${SELECT_HOLD} WHERE h.request_id = ?`).get(requestId) as any;
@@ -82,7 +92,15 @@ export async function onHold(db: DB, requestId: string, token: string, expiresAt
   const link = `${config.appBaseUrl}/a/${token}`;
   const tasks: Promise<unknown>[] = [];
   if (phone && events.includes("hold")) {
-    const body = holdMessage({ agentName: row.agent_name, amountMicro: row.amount_micro, recipient: row.recipient, known, flags: JSON.parse(row.flags_json), minutes: config.holdMinutes, link });
+    // Approve by text: a one-time 6-digit code for THIS payment, only when enabled and within the owner's cap.
+    const ta = getOwnerSettings(db).textApprove;
+    let code: string | null = null;
+    if (ta.enabled && row.amount_micro <= ta.maxMicro) {
+      ensureTextCols(db);
+      code = String(randomInt(0, 1_000_000)).padStart(6, "0");
+      db.prepare("UPDATE holds SET text_code_hash=?, text_attempts=0 WHERE request_id=?").run(codeHash(requestId, code), requestId);
+    }
+    const body = holdMessage({ agentName: row.agent_name, amountMicro: row.amount_micro, recipient: row.recipient, known, flags: JSON.parse(row.flags_json), minutes: config.holdMinutes, link, code, linkAllowed: smsLinksAllowed() });
     tasks.push(sendSms(db, phone, body).then((sid) => sid && db.prepare("UPDATE holds SET sms_sid=? WHERE request_id=?").run(sid, requestId)));
   }
   tasks.push(
@@ -129,7 +147,17 @@ export async function denyHold(db: DB, requestId: string): Promise<{ ok: boolean
   return { ok: true, refundTx: tx };
 }
 
-/** Deny the newest pending hold for an agent (SMS "NO" has no request id). */
+/** "NO 482913": cancel just the payment with that code (same sender rules as approveByText). */
+export async function denyByTextCode(db: DB, phone: string, code: string): Promise<boolean> {
+  ensureTextCols(db);
+  const rows = (isOwnerPhone(db, phone)
+    ? db.prepare(`${SELECT_HOLD} WHERE h.status='held'`).all()
+    : db.prepare(`${SELECT_HOLD} JOIN notify n ON n.agent_id = r.agent_id WHERE h.status='held' AND n.phone = ?`).all(phone)) as any[];
+  const match = rows.find((r) => r.text_code_hash && r.text_code_hash === codeHash(r.request_id, code));
+  return match ? (await denyHold(db, match.request_id)).ok : false;
+}
+
+/** Deny every pending hold this number can see (a bare SMS "NO" has no request id). */
 export async function denyLatestByPhone(db: DB, phone: string): Promise<{ ok: boolean; count: number }> {
   // The owner's number cancels across every agent; a per-agent number only cancels that agent's holds.
   const rows = isOwnerPhone(db, phone)
@@ -231,13 +259,50 @@ export async function approveWithPasskey(db: DB, token: string, assertion: any):
   });
   if (!v.verified) throw new Error("Passkey check failed.");
   db.prepare("UPDATE passkeys SET counter=? WHERE id=?").run(v.authenticationInfo.newCounter, key.id);
-  if (!transition(db, hold.requestId, "approved", "approved")) throw new Error("This payment was already handled.");
+  return release(db, hold.requestId, "passkey");
+}
+
+/** Move a verified approval to 'approved' and release the escrow on Arc. Shared by passkey and text approval. */
+async function release(db: DB, requestId: string, via: "passkey" | "text"): Promise<{ ok: boolean; releaseTx: string | null }> {
+  if (!transition(db, requestId, "approved", "approved")) throw new Error("This payment was already handled.");
+  ensureTextCols(db);
+  db.prepare("UPDATE holds SET approved_via=? WHERE request_id=?").run(via, requestId);
   let tx: string | null = null;
   try {
-    tx = await vaultApprove(hold.requestId);
+    tx = await vaultApprove(requestId);
   } catch (e) {
-    console.error(`[approve ${hold.requestId}] vault`, e);
+    console.error(`[approve ${requestId}] vault`, e);
   }
-  if (tx) db.prepare("UPDATE holds SET resolve_tx=? WHERE request_id=?").run(tx, hold.requestId);
+  if (tx) db.prepare("UPDATE holds SET resolve_tx=? WHERE request_id=?").run(tx, requestId);
   return { ok: true, releaseTx: tx };
+}
+
+/**
+ * "YES 482913" from the owner's phone. The code is per payment (only its hash is stored), the sender must be the
+ * owner's number (or that agent's own number), the amount must be within the text-approval cap, and 5 wrong codes
+ * lock text approval for the holds that number can see (passkey still works).
+ */
+export async function approveByText(db: DB, phone: string, code: string): Promise<{ ok: boolean; message: string; releaseTx?: string | null }> {
+  ensureTextCols(db);
+  const ta = getOwnerSettings(db).textApprove;
+  if (!ta.enabled) return { ok: false, message: "Approving by text is turned off. Use your passkey on the dashboard." };
+  const rows = (isOwnerPhone(db, phone)
+    ? db.prepare(`${SELECT_HOLD} WHERE h.status='held'`).all()
+    : db.prepare(`${SELECT_HOLD} JOIN notify n ON n.agent_id = r.agent_id WHERE h.status='held' AND n.phone = ?`).all(phone)) as any[];
+  if (!rows.length) return { ok: false, message: "Nothing is waiting for you right now." };
+  const live = rows.filter((r) => r.text_code_hash && r.text_attempts < MAX_TEXT_ATTEMPTS);
+  const match = live.find((r) => {
+    const a = Buffer.from(codeHash(r.request_id, code));
+    const b = Buffer.from(r.text_code_hash);
+    return a.length === b.length && timingSafeEqual(a, b);
+  });
+  if (!match) {
+    for (const r of live) db.prepare("UPDATE holds SET text_attempts = text_attempts + 1 WHERE request_id=?").run(r.request_id);
+    return { ok: false, message: live.length ? "That code doesn't match a waiting payment. Check the code in our text." : "Approving these by text isn't available. Use your passkey on the dashboard." };
+  }
+  if (match.amount_micro > ta.maxMicro) return { ok: false, message: `Payments over ${(ta.maxMicro / 1e6).toFixed(2)} USDC need your passkey in Wallet Buddy.` };
+  if (match.expires_ms <= Date.now()) return { ok: false, message: "That payment expired and was refunded." };
+  if (arcStatus().vault && !match.hold_tx) return { ok: false, message: "That payment never reached the vault on Arc, so there's nothing to release." };
+  const r = await release(db, match.request_id, "text");
+  return { ok: true, message: `Allowed: ${(match.amount_micro / 1e6).toFixed(2)} USDC to ${shortRecipient(match.recipient)}.${r.releaseTx ? " Released on Arc." : ""}`, releaseTx: r.releaseTx };
 }

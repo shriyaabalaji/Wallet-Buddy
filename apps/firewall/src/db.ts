@@ -100,7 +100,8 @@ export const SPENDING_SQL = `('reserved','settled','held','approved','unconfirme
 
 export function openDb(path: string): DB {
   const db = new DatabaseSync(path);
-  db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;");
+  // busy_timeout first: switching to WAL needs a lock, and a second process (e.g. a dev-watch restart) must wait, not crash.
+  db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
   db.exec(SCHEMA);
   try { db.exec("ALTER TABLE holds ADD COLUMN hold_error TEXT"); } catch { /* already there */ }
   try { db.exec("ALTER TABLE requests ADD COLUMN failure_reason TEXT"); } catch { /* already there */ }

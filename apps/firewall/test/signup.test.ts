@@ -64,7 +64,7 @@ describe("text-message settings on their own", () => {
 describe("owner-wide settings", () => {
   it("one phone for every agent; a per-agent number overrides it; agents can't touch it; holds list is global", async () => {
     const { contactFor, isOwnerPhone } = await import("../src/settings");
-    expect((await call("POST", "/v1/settings", OWNER, { phone: "+16045550111", events: ["hold", "paused", "nope"] })).json).toEqual({ phone: "+16045550111", events: ["hold", "paused"] });
+    expect((await call("POST", "/v1/settings", OWNER, { phone: "+16045550111", events: ["hold", "paused", "nope"] })).json).toMatchObject({ phone: "+16045550111", events: ["hold", "paused"] });
     expect((await call("GET", "/v1/settings", OWNER)).json).toMatchObject({ phone: "+16045550111", events: ["hold", "paused"] });
     expect((await call("POST", "/v1/settings", OWNER, { phone: "604 555" })).status).toBe(400);
     expect((await call("POST", "/v1/settings", ALICE, { phone: "+16045550111" })).status).toBe(403);

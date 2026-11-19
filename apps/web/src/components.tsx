@@ -12,13 +12,14 @@ const NAV = [
   { href: "/agents", label: "Agents", icon: "users" },
   { href: "/rules", label: "Rules", icon: "shield" },
   { href: "/activity", label: "Activity", icon: "list" },
+  { href: "/proof", label: "Onchain proof", icon: "check" },
 ];
 
 /** App shell: a quiet left sidebar (nav, agent, network) next to the page. */
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
   // The approve page (opened from a text, no login) and the sign-in page stand alone and load no owner data.
-  const standalone = path.startsWith("/a/") || path === "/login";
+  const standalone = path.startsWith("/a/") || path === "/login" || path === "/proof";
   if (standalone) return <main className="page">{children}</main>;
   return (
     <AgentProvider enabled>

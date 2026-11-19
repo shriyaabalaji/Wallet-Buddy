@@ -24,6 +24,7 @@ const ROUTES: [method: string, path: RegExp, access: Access][] = [
   ["POST", /^\/v1\/payments\/[^/]+\/reconcile$/, "owner"],
   ["POST", /^\/v1\/optimizer\/recommend$/, "owner"],
   ["GET", /^\/v1\/optimizer\/recommendations$/, "owner"],
+  ["GET", /^\/v1\/proof$/, "link"], // public onchain proof page
   ["GET", /^\/v1\/approvals\/[^/]+$/, "link"],
   ["POST", /^\/v1\/approvals\/[^/]+\/(deny|approve\/options|approve)$/, "link"],
 ];

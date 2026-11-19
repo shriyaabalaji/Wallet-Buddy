@@ -348,7 +348,7 @@ export function PauseButton({ agent, onChanged, compact = false }: { agent: Pick
 }
 
 /**
- * A metric card that opens its details as a pop-up: on click it flips and flies from where it sits to the middle of
+ * A metric card that opens its details as a pop-up: on click it grows from where it sits into the middle of
  * the screen. Clicks on links or buttons inside the card do their own thing. Close with the X, Esc, or the backdrop.
  */
 export function PopCard({ title, className = "", front, details }: { title: string; className?: string; front: ReactNode; details: ReactNode }) {
@@ -356,18 +356,43 @@ export function PopCard({ title, className = "", front, details }: { title: stri
   const dlgRef = useRef<HTMLDialogElement>(null);
   const [open, setOpen] = useState(false);
 
+  const closing = useRef(false);
+  const still = () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // The card grows from where it sits into the pop-up (and shrinks back on close): one transform from the card's box
+  // to the pop-up's box, with the contents fading in once it's mostly open. Web Animations, so close can run in reverse.
+  function morph(body: HTMLElement, card: HTMLElement) {
+    const c = card.getBoundingClientRect(), b = body.getBoundingClientRect();
+    const dx = c.left + c.width / 2 - (b.left + b.width / 2), dy = c.top + c.height / 2 - (b.top + b.height / 2);
+    return `translate(${dx}px, ${dy}px) scale(${c.width / b.width}, ${c.height / b.height})`;
+  }
   function show() {
     const card = cardRef.current, dlg = dlgRef.current;
     if (!card || !dlg) return;
-    const r = card.getBoundingClientRect();
-    // Start the pop-up over the card (offset from screen center, scaled to the card's width), then animate to center.
-    dlg.style.setProperty("--dx", `${r.left + r.width / 2 - window.innerWidth / 2}px`);
-    dlg.style.setProperty("--dy", `${r.top + r.height / 2 - window.innerHeight / 2}px`);
-    dlg.style.setProperty("--s", String(Math.min(1, r.width / Math.min(460, window.innerWidth - 32))));
     dlg.showModal();
     setOpen(true);
+    const body = dlg.querySelector<HTMLElement>(".pop-body"), inner = dlg.querySelector<HTMLElement>(".pop-inner");
+    if (!body || !inner || still()) return;
+    body.animate([{ transform: morph(body, card), borderRadius: "24px" }, { transform: "none" }], { duration: 420, easing: "cubic-bezier(.22, .9, .25, 1)" });
+    inner.animate([{ opacity: 0 }, { opacity: 0, offset: 0.4 }, { opacity: 1 }], { duration: 420, easing: "ease-out" });
   }
-  function close() { dlgRef.current?.close(); }
+  function close() {
+    const card = cardRef.current, dlg = dlgRef.current;
+    if (!dlg?.open || closing.current) return;
+    const body = dlg.querySelector<HTMLElement>(".pop-body"), inner = dlg.querySelector<HTMLElement>(".pop-inner");
+    if (!card || !body || !inner || still()) { dlg.close(); return; }
+    closing.current = true;
+    inner.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, fill: "forwards" });
+    try { dlg.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300, pseudoElement: "::backdrop", fill: "forwards" }); } catch { /* older browsers: backdrop just disappears */ }
+    const a = body.animate([{ transform: "none" }, { transform: morph(body, card) }], { duration: 300, easing: "cubic-bezier(.4, 0, .6, 1)", fill: "forwards" });
+    a.onfinish = () => {
+      dlg.close();
+      body.getAnimations().forEach((x) => x.cancel());
+      inner.getAnimations().forEach((x) => x.cancel());
+      dlg.getAnimations({ subtree: false }).forEach((x) => x.cancel());
+      closing.current = false;
+    };
+  }
 
   return (
     <>
@@ -383,11 +408,14 @@ export function PopCard({ title, className = "", front, details }: { title: stri
       <dialog
         ref={dlgRef} className="pop-dialog" aria-label={title}
         onClose={() => { setOpen(false); cardRef.current?.focus(); }}
+        onCancel={(e) => { e.preventDefault(); close(); }}
         onClick={(e) => { if (e.target === e.currentTarget) close(); }}
       >
         <div className="pop-body">
-          <div className="pop-head"><h2>{title}</h2><button className="round-link" onClick={close} aria-label="Close"><Icon name="x" size={16} /></button></div>
-          {details}
+          <div className="pop-inner">
+            <div className="pop-head"><h2>{title}</h2><button className="round-link" onClick={close} aria-label="Close"><Icon name="x" size={16} /></button></div>
+            {details}
+          </div>
         </div>
       </dialog>
     </>

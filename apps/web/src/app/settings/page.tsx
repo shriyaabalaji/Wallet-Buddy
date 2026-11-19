@@ -27,13 +27,15 @@ export default function SettingsPage() {
 
 const EVENT_LABEL: Record<NotifyEvent, string> = { hold: "Held for approval", budget80: "80% of budget used", paused: "Agent paused" };
 const EVENTS = Object.keys(EVENT_LABEL) as NotifyEvent[];
-type Settings = { phone: string | null; events: NotifyEvent[]; twilio: boolean; envPhoneSet?: boolean };
+type Settings = { phone: string | null; events: NotifyEvent[]; twilio: boolean; sms?: "textbelt" | "twilio" | "dry-run"; envPhoneSet?: boolean; textApprove?: { enabled: boolean; maxMicro: number } };
 
 /** GET/POST /v1/settings. A number set on one agent's page (advanced) overrides this for that agent only. */
 function TextMessages() {
   const cur = usePoll(() => api<Settings>("/v1/settings"), 60000);
   const [phone, setPhone] = useState("");
   const [events, setEvents] = useState<NotifyEvent[]>(["hold"]);
+  const [textOk, setTextOk] = useState(true);
+  const [capUsd, setCapUsd] = useState("5");
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [phoneErr, setPhoneErr] = useState<string | null>(null);
@@ -45,6 +47,7 @@ function TextMessages() {
     if (loaded || !cur.data) return;
     setPhone(cur.data.phone ? formatPhone(cur.data.phone) : "");
     setEvents(cur.data.events);
+    if (cur.data.textApprove) { setTextOk(cur.data.textApprove.enabled); setCapUsd(String(cur.data.textApprove.maxMicro / 1e6)); }
     setLoaded(true);
   }, [cur.data, loaded]);
 
@@ -57,9 +60,11 @@ function TextMessages() {
     setError(null); setDone(null);
     const normalized = normalizePhone(phone);
     if (!normalized) { setPhoneErr("Include the country code, like +1 604 555 0100."); return; }
+    const cap = Number(capUsd);
+    if (!Number.isFinite(cap) || cap < 0 || cap > 100) { setError(new ApiError("Text-approval limit must be between $0 and $100.", 400)); return; }
     setPhoneErr(null); setBusy(true);
     try {
-      await api("/v1/settings", { method: "POST", body: { phone: normalized, events: EVENTS.filter((e) => events.includes(e)) } });
+      await api("/v1/settings", { method: "POST", body: { phone: normalized, events: EVENTS.filter((e) => events.includes(e)), textApprove: { enabled: textOk, maxMicro: Math.round(cap * 1e6) } } });
       setPhone(formatPhone(normalized));
       setDone(events.length ? `Saved. Texts go to ${formatPhone(normalized)}.` : "Saved. No texts will be sent.");
       await cur.refresh();
@@ -88,13 +93,24 @@ function TextMessages() {
           <label key={e} className="check"><input type="checkbox" checked={events.includes(e)} onChange={(ev) => toggle(e, ev.target.checked)} /> {EVENT_LABEL[e]}</label>
         ))}
       </fieldset>
+      <div className="field">
+        <label className="check"><input type="checkbox" checked={textOk} onChange={(e) => { setTextOk(e.target.checked); setDone(null); }} /> Let me approve by text</label>
+        {textOk && (
+          <div className="row" style={{ gap: 8, alignItems: "center", justifyContent: "flex-start" }}>
+            <label htmlFor="cap" className="small muted">Up to $</label>
+            <input id="cap" type="number" min={0} max={100} step={0.5} value={capUsd} onChange={(e) => { setCapUsd(e.target.value); setDone(null); }} style={{ width: 90 }} />
+            <span className="small muted">per payment; bigger ones need your passkey</span>
+          </div>
+        )}
+      </div>
       <div className="toolbar sms-actions">
         <button className="btn" onClick={save} disabled={busy || !loaded || !phone.trim()}>{busy ? "Saving…" : "Save"}</button>
         {done && <span className="saved-note" role="status"><Icon name="check" size={16} />{done}</span>}
       </div>
       {error && <ErrorState error={error} />}
       <p className="muted small">
-        Reply NO to a text to cancel that held payment, or PAUSE to stop all your agents. Approving a payment always needs your passkey.
+        Each held payment&apos;s text has its own 6-digit code: reply <strong>YES 123456</strong> to approve it{textOk ? "" : " (turned off above)"}, <strong>NO</strong> to cancel, or <strong>PAUSE</strong> to stop all your agents. Only replies from this number count.
+        {cur.data?.sms === "textbelt" && <><br />Texts are sent with Textbelt.</>}
         {cur.data?.twilio === false && <><br />Texting isn&apos;t set up on the firewall, so texts are written to its log instead of sent.</>}
       </p>
     </section>

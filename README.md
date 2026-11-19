@@ -101,7 +101,7 @@ cp .env.agent.example .env.agent                                    # ANTHROPIC_
 cp .env.sellers.example .env.sellers
 cp apps/web/.env.example apps/web/.env.local                        # dashboard password + owner token
 npm run demo        # starts firewall + sellers if needed, then runs the whole story; safe to run repeatedly
-npm run dev:web     # dashboard on :3000 (Overview, Agents, Rules, Activity, Onchain proof)
+npm run dev:web     # dashboard on :3000 (Overview, Agents, Activity + Onchain, Settings)
 ```
 
 `npm run demo` prints every step with its Arc transaction links (a full real transcript is in `docs/runs/demo-run-2.txt`):
@@ -202,7 +202,7 @@ Tests (`npm test`, `npm run test:contracts`):
 - **Sellers:** all ours, disclosed. Arc testnet has no comparable third-party x402 sellers. Their data is real (ESPN's public NBA feeds).
 - **The injection demo's hijack is scripted:** we make the agent obey, to show that the firewall holds even when the agent doesn't. In our runs, the real Claude agent didn't act on injected text.
 - **"Settled" means Circle's CLI paid and the seller delivered.** Gateway settles with sellers in batches and the CLI returns no transaction reference, so we don't claim a per-payment onchain hash. Circle's transfer API reports these `completed`.
-- **Texts are dry-run** (logged, not sent) until Twilio is configured. Set the phone number under Rules → Text messages.
+- **Texts are dry-run** (logged, not sent) until Twilio is configured. Set the phone number under Settings → Text messages.
 - **Passkey approval** was verified live; after the database reset on 2026-11-17 the owner must enroll again.
 - **Optimizer requests aren't rate-limited.** The optimizer API exists, but the dashboard no longer shows it.
 - **Dependencies:** `npm audit --omit=dev` reports 4 high-severity advisories in an old `zod` nested inside Circle's `@x402/*` packages. We haven't forced an upgrade of Circle's dependencies.
@@ -214,7 +214,7 @@ Tests (`npm test`, `npm run test:contracts`):
 | `packages/policy` | Pure rule evaluation (10 kinds), canonical policy hash, plain-English descriptions |
 | `packages/client` | `requestPayment()` for any TypeScript agent |
 | `apps/firewall` | HTTP API (`docs/API.md`), ledger, payer, holds, SMS, passkeys, anomalies, injection scan, optimizer, Arc adapter, proof indexer |
-| `apps/web` | Dashboard: Overview (balance), Agents (add agent + key), Rules (plain English, text settings), Activity, `/proof`, `/a/[token]` approve page |
+| `apps/web` | Dashboard: Overview (wallet balance + agent carousel), Agents (per-agent overview + plain-English rules, add agent), Activity (payments + Onchain tab), Settings (phone, wallet, passkey); public `/proof`; `/a/[token]` approve page |
 | `apps/agent` | `llm.ts` Claude research agent; `index.ts` scripted phases (normal / race / labelled attack) |
 | `apps/mcp` | MCP server: `pay_with_firewall` |
 | `apps/sellers` | x402 sellers (Circle Gateway middleware) reselling live NBA data; `/catalog` is free |

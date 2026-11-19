@@ -1,0 +1,143 @@
+"use client";
+import { useEffect, useState } from "react";
+import { ARC_EXPLORER, ApiError, api, type NotifyEvent } from "@/lib/api";
+import { useAgents } from "@/lib/agents";
+import { usePoll } from "@/lib/hooks";
+import { ErrorState, Icon, cents, shortAddr } from "@/components";
+import { PasskeySetup } from "@/passkey";
+import { formatPhone, normalizePhone } from "./phone";
+
+/** Owner-wide settings: one phone for every agent, and the one wallet they all spend from. */
+export default function SettingsPage() {
+  return (
+    <>
+      <h1>Settings</h1>
+      <div className="settings-split">
+        <div className="rules-col">
+          <TextMessages />
+          <PasskeySetup />
+        </div>
+        <div className="rules-col">
+          <Wallet />
+        </div>
+      </div>
+    </>
+  );
+}
+
+const EVENT_LABEL: Record<NotifyEvent, string> = { hold: "Held for approval", budget80: "80% of budget used", paused: "Agent paused" };
+const EVENTS = Object.keys(EVENT_LABEL) as NotifyEvent[];
+type Settings = { phone: string | null; events: NotifyEvent[]; twilio: boolean; envPhoneSet?: boolean };
+
+/** GET/POST /v1/settings. A number set on one agent's page (advanced) overrides this for that agent only. */
+function TextMessages() {
+  const cur = usePoll(() => api<Settings>("/v1/settings"), 60000);
+  const [phone, setPhone] = useState("");
+  const [events, setEvents] = useState<NotifyEvent[]>(["hold"]);
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [phoneErr, setPhoneErr] = useState<string | null>(null);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+
+  // Fill the form once from what the firewall has stored; later polls don't overwrite what the owner is typing.
+  useEffect(() => {
+    if (loaded || !cur.data) return;
+    setPhone(cur.data.phone ? formatPhone(cur.data.phone) : "");
+    setEvents(cur.data.events);
+    setLoaded(true);
+  }, [cur.data, loaded]);
+
+  const toggle = (e: NotifyEvent, on: boolean) => {
+    setDone(null);
+    setEvents((c) => (on ? (c.includes(e) ? c : [...c, e]) : c.filter((x) => x !== e)));
+  };
+
+  async function save() {
+    setError(null); setDone(null);
+    const normalized = normalizePhone(phone);
+    if (!normalized) { setPhoneErr("Include the country code, like +1 604 555 0100."); return; }
+    setPhoneErr(null); setBusy(true);
+    try {
+      await api("/v1/settings", { method: "POST", body: { phone: normalized, events: EVENTS.filter((e) => events.includes(e)) } });
+      setPhone(formatPhone(normalized));
+      setDone(events.length ? `Saved. Texts go to ${formatPhone(normalized)}.` : "Saved. No texts will be sent.");
+      await cur.refresh();
+    } catch (e) {
+      setError(e instanceof ApiError ? e : new ApiError(e instanceof Error ? e.message : "Couldn't save.", 0));
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <section className="panel" aria-labelledby="sms">
+      <h2 id="sms">Text messages</h2>
+      {cur.error && !cur.data && <ErrorState error={cur.error} onRetry={cur.refresh} />}
+      <div className="field">
+        <label htmlFor="phone">Your phone number</label>
+        <input
+          id="phone" type="tel" autoComplete="tel" inputMode="tel" placeholder="+1 604 555 0100"
+          value={phone} onChange={(e) => { setPhone(e.target.value); setPhoneErr(null); setDone(null); }}
+          aria-invalid={phoneErr ? true : undefined} aria-describedby={phoneErr ? "phone-err" : "phone-note"}
+        />
+        {phoneErr && <p id="phone-err" role="alert" className="field-err">{phoneErr}</p>}
+        <p id="phone-note" className="small muted">One number for every agent.</p>
+      </div>
+      <fieldset className="checks">
+        <legend className="muted small">Text me when</legend>
+        {EVENTS.map((e) => (
+          <label key={e} className="check"><input type="checkbox" checked={events.includes(e)} onChange={(ev) => toggle(e, ev.target.checked)} /> {EVENT_LABEL[e]}</label>
+        ))}
+      </fieldset>
+      <div className="toolbar sms-actions">
+        <button className="btn" onClick={save} disabled={busy || !loaded || !phone.trim()}>{busy ? "Saving…" : "Save"}</button>
+        {done && <span className="saved-note" role="status"><Icon name="check" size={16} />{done}</span>}
+      </div>
+      {error && <ErrorState error={error} />}
+      <p className="muted small">
+        Reply NO to a text to cancel that held payment, or PAUSE to stop all your agents. Approving a payment always needs your passkey.
+        {cur.data?.twilio === false && <><br />Texting isn&apos;t set up on the firewall, so texts are written to its log instead of sent.</>}
+      </p>
+    </section>
+  );
+}
+
+/** The Circle Agent Wallet every agent pays from, read from GET /health. Connecting one happens on the firewall host, not here. */
+function Wallet() {
+  const { health } = useAgents();
+  const buyer = health?.buyer;
+  const live = buyer && "gatewayAvailableUsdc" in buyer ? buyer : null;
+  const circle = health?.paymentMode === "circle-agent-wallet";
+  const addr = health?.signer ?? null;
+  return (
+    <section className="panel" aria-labelledby="wallet">
+      <div className="panel-head">
+        <h2 id="wallet">Wallet</h2>
+        {health && (
+          circle && addr
+            ? <span className="badge ok">Circle Agent Wallet connected</span>
+            : <span className="badge warn">{circle ? "No wallet address" : "Local test key"}</span>
+        )}
+      </div>
+      {!health ? <p className="muted" role="status">Loading…</p> : (
+        <div className="facts">
+          <div className="kv"><span>Address</span>{addr ? <a className="mono" href={`${ARC_EXPLORER}/address/${addr}`} target="_blank" rel="noreferrer" title={addr}>{shortAddr(addr)}</a> : <span>Not set</span>}</div>
+          <div className="kv"><span>Pays with</span><span>{circle ? "Circle Agent Wallet" : "Local key (testnet only)"}</span></div>
+          <div className="kv"><span>Network</span><span>Arc {health.network ?? "testnet"}</span></div>
+          <div className="kv"><span>Gateway balance</span><span>{live ? `${cents(live.gatewayAvailableUsdc)} USDC` : buyer && "error" in buyer ? "Couldn't read it" : "Not set up"}</span></div>
+          {live && live.payer !== addr && <div className="kv"><span>Gateway depositor</span><a className="mono" href={`${ARC_EXPLORER}/address/${live.payer}`} target="_blank" rel="noreferrer" title={live.payer}>{shortAddr(live.payer)}</a></div>}
+        </div>
+      )}
+      <div className="steps">
+        <h3 className="small-h">{circle && addr ? "Connect a different wallet" : "Connect your Circle Agent Wallet"}</h3>
+        <p className="small muted">This runs on the machine that hosts the firewall: Circle&apos;s CLI signs in with a code sent to your email, which a browser can&apos;t do for you.</p>
+        <ol>
+          <li>Install Circle&apos;s CLI: <code>npm i -g @circle-fin/cli@1.4.0</code></li>
+          <li>Sign in: <code>circle wallet login &lt;email&gt; --testnet</code></li>
+          <li>Find the wallet: <code>circle wallet list --type agent --chain ARC-TESTNET</code>, then set <code>CIRCLE_AGENT_WALLET_ADDRESS</code> in <code>.env.firewall</code></li>
+          <li>Find its Gateway depositor: <code>circle gateway balance --address &lt;wallet&gt; --chain ARC-TESTNET --output json</code>, then set <code>backingEOA</code> as <code>CIRCLE_GATEWAY_DEPOSITOR</code></li>
+          <li>Restart the firewall.</li>
+        </ol>
+      </div>
+    </section>
+  );
+}

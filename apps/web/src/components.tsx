@@ -1,24 +1,23 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { formatUsd } from "@agent-firewall/policy";
 import type { AnomalySignal } from "@agent-firewall/policy";
-import { ApiError, type Outcome, type Settlement, type SettlementState } from "@/lib/api";
+import { ARC_EXPLORER, ApiError, api, txUrl, type ActivityItem, type AgentListItem, type Health, type Outcome, type Settlement, type SettlementState } from "@/lib/api";
 import { AgentProvider, useAgents } from "@/lib/agents";
 
 const NAV = [
   { href: "/", label: "Overview", icon: "home" },
   { href: "/agents", label: "Agents", icon: "users" },
-  { href: "/rules", label: "Rules", icon: "shield" },
   { href: "/activity", label: "Activity", icon: "list" },
-  { href: "/proof", label: "Onchain proof", icon: "check" },
+  { href: "/settings", label: "Settings", icon: "gear" },
 ];
 
-/** App shell: a quiet left sidebar (nav, agent, network) next to the page. */
+/** App shell: a quiet left sidebar (nav, network) next to the page. Every page is about the whole wallet; none depends on a picked agent. */
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
-  // The approve page (opened from a text, no login) and the sign-in page stand alone and load no owner data.
+  // The approve page (opened from a text, no login), the sign-in page and the public proof page stand alone and load no owner data.
   const standalone = path.startsWith("/a/") || path === "/login" || path === "/proof";
   if (standalone) return <main className="page">{children}</main>;
   return (
@@ -29,36 +28,28 @@ export function Shell({ children }: { children: ReactNode }) {
 }
 
 function ShellFrame({ path, children }: { path: string; children: ReactNode }) {
-  const { agent, health, agentsError } = useAgents();
-  const waiting = agent?.pendingApprovals ?? 0;
-  const paused = agent?.status === "paused";
+  const { agents, health, agentsError } = useAgents();
+  const waiting = (agents ?? []).reduce((n, a) => n + a.pendingApprovals, 0);
   const live = Boolean(health?.arc?.registry);
   const online = Boolean(health) && !agentsError;
   async function signOut() {
     await fetch("/api/session", { method: "DELETE" }).catch(() => null);
     window.location.assign("/login");
   }
+  const current = (href: string) => (href === "/" ? path === "/" : path === href || path.startsWith(`${href}/`));
   return (
     <div className="shell">
       <aside className="sidebar">
         <Brand />
         <nav aria-label="Main" className="nav">
           {NAV.map((n) => (
-            <Link key={n.href} href={n.href} aria-current={path === n.href ? "page" : undefined}>
+            <Link key={n.href} href={n.href} aria-current={current(n.href) ? "page" : undefined}>
               <Icon name={n.icon} />
               {n.label}
               {n.href === "/" && waiting > 0 && <span className="count" aria-label={`${waiting} waiting for you`}>{waiting}</span>}
             </Link>
           ))}
         </nav>
-        <AgentPicker />
-        {agent && (
-          <div className="side-box">
-            <span className="status"><span className={`dot ${paused ? "paused" : ""}`} aria-hidden="true" /><span className="cap">{paused ? "Paused" : "Active"}</span></span>
-            <div className="kv"><span>Task</span><span className="mono">{agent.currentTask ?? "none yet"}</span></div>
-            <div className="kv"><span>Rules</span><span>{agent.hasPolicy ? "Locked on Arc" : "Not saved"}</span></div>
-          </div>
-        )}
         <div className="side-foot">
           <span className="status"><span className={`dot ${online ? "" : "paused"}`} aria-hidden="true" />{online ? (live ? "Arc testnet" : "Local mode") : "Wallet Buddy offline"}</span>
           <span className="muted mono">Chain 5042002 · USDC</span>
@@ -75,22 +66,6 @@ export function Brand() {
   return <Link href="/" className="brand"><span className="brand-mark" aria-hidden="true"><Icon name="wallet" size={18} /></span>Wallet Buddy</Link>;
 }
 
-/** Which agent every page shows. Hidden until agents load; nothing to pick when none are registered. */
-export function AgentPicker() {
-  const { agents, agentId, selectAgent } = useAgents();
-  if (!agents || agents.length === 0 || !agentId) return null;
-  return (
-    <div className="agent-pick">
-      <label htmlFor="agent-pick" className="side-label">Agent</label>
-      <select id="agent-pick" value={agentId} onChange={(e) => selectAgent(e.target.value)}>
-        {agents.map((a) => (
-          <option key={a.id} value={a.id}>{displayName(a.name)}{a.status === "paused" ? " (paused)" : ""}</option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
 /** Agent names are stored as typed (or derived from the id, e.g. "research agent"); show them capitalized. */
 export const displayName = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
 
@@ -100,7 +75,7 @@ export function NoAgents() {
     <div className="panel" role="status">
       <h2>No agents yet</h2>
       <p className="muted">An agent shows up here when you register it, save rules for it, or it asks the firewall to pay for the first time.</p>
-      <div><Link className="btn" href="/agents">Register an agent</Link></div>
+      <div><Link className="btn" href="/agents?add=1">Add an agent</Link></div>
     </div>
   );
 }
@@ -209,6 +184,10 @@ const PATHS: Record<string, ReactNode> = {
   undo: <path d="M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3" />,
   users: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a5.5 5.5 0 0 1 3.5 6" /></>,
   bolt: <path d="M13 3 5 14h6l-1 7 8-11h-6z" />,
+  gear: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></>,
+  search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></>,
+  next: <path d="m9 18 6-6-6-6" />,
+  plus: <path d="M12 5v14M5 12h14" />,
   wallet: <><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18v3" /><path d="M4 7.5V17a2 2 0 0 0 2 2h13a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1H6.5A2.5 2.5 0 0 1 4 7.5z" /><path d="M16 13.5h.01" /></>,
 };
 
@@ -237,4 +216,123 @@ export function Avatar({ recipient }: { recipient: string }) {
   const unknown = /^0x[0-9a-f]{6,}$/i.test(recipient);
   const letters = unknown ? "?" : recipient.replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase();
   return <span className={`avatar ${unknown ? "unknown" : ""}`} aria-hidden="true">{letters}</span>;
+}
+
+// ---------- shared by Overview and Agents ----------
+
+/** Whole cents, rounded down, for balances read from chain (they carry 6 decimals): never overstate money. */
+const centsMicro = (usdc: number) => Math.floor(usdc * 100 + 1e-9) * 10_000;
+export const cents = (usdc: number) => formatUsd(centsMicro(usdc));
+
+/**
+ * The one wallet every agent spends from: its Circle Gateway balance, from the owner view of GET /health (buyer =
+ * funding.ts fundingStatus; vault = the treasury that tops it up). Shared with the shell's health poll, so no extra request.
+ */
+export function BalanceCard({ health }: { health: Health | null }) {
+  const buyer = health?.buyer;
+  const vault = health?.vault;
+  const live = buyer && "gatewayAvailableUsdc" in buyer ? buyer : null;
+  const addr = live?.payer ?? health?.signer ?? null;
+  const treasury = vault && "treasuryUsdc" in vault ? vault : null;
+  const topUpLeft = live ? Math.max(0, live.dailyCapUsdc - live.depositedTodayUsdc) : null;
+  return (
+    <div className="hero balance">
+      <div className="row1"><h2>Balance</h2><span className="k">USDC · Arc {health?.network ?? "testnet"}</span></div>
+      {!health ? (
+        <p className="k" role="status">Loading…</p>
+      ) : live ? (
+        <div>
+          <Money micro={centsMicro(live.gatewayAvailableUsdc)} size="xl" />
+          <span className="k under">In Circle Gateway, shared by all your agents</span>
+        </div>
+      ) : (
+        <div>
+          <span className="money md">Balance unavailable</span>
+          <span className="k under">{buyer && "error" in buyer ? "Couldn't read the Gateway balance." : "Gateway funding isn't set up on this firewall."}</span>
+        </div>
+      )}
+      <div className="row3">
+        {addr ? (
+          <a href={`${ARC_EXPLORER}/address/${addr}`} target="_blank" rel="noreferrer" className="mono" title={`${addr} on the Arc explorer`}>{shortAddr(addr)}</a>
+        ) : <span />}
+        {(treasury || topUpLeft !== null) && (
+          <span className="balance-meta">
+            {treasury && <span>Treasury {cents(treasury.treasuryUsdc)}{treasury.low && <span className="pill warn">Low</span>}</span>}
+            {topUpLeft !== null && <span>{cents(topUpLeft)} top-up left today</span>}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** One payment as a bank-statement row. `agentName` adds which agent paid (for lists that mix agents). */
+export function TxRow({ a, agentName }: { a: ActivityItem; agentName?: string }) {
+  const struck = ["blocked", "released", "denied", "expired"].includes(a.status);
+  const purpose = a.purpose?.trim() || a.category;
+  // The address is already in the row; drop it from the reason ("0x7a3f…c91e isn't on…" → "Isn't on…").
+  const why = a.reason.replace(/^0x[0-9a-f]+…[0-9a-f]+\s+(\w)/i, (_, c: string) => c.toUpperCase());
+  const flagged = (a.anomalies ?? []).filter((x) => x.severity !== "low").map((x) => ANOMALY_LABEL[x.type]);
+  const memo = [agentName, struck || a.status === "held" ? `${purpose} · ${why}` : purpose, ...flagged].filter(Boolean).join(" · ");
+  const url = txUrl(a.arcTx, a.arcTxUrl);
+  return (
+    <tr>
+      <td className="t-time muted mono nowrap">{shortTime(a.at)}</td>
+      <td className="t-to">
+        <span className="who">
+          <Avatar recipient={a.recipient} />
+          <span style={{ minWidth: 0 }}>
+            <span className={/^0x/i.test(a.recipient) ? "mono" : ""} title={a.recipient}>{shortAddr(a.recipient)}</span>
+            <span className="memo">{memo}</span>
+          </span>
+        </span>
+      </td>
+      <td className="t-status"><OutcomeBadge outcome={a.outcome} status={a.status} settlement={a.settlement} /></td>
+      <td className={`t-amt r mono ${struck ? "strike" : ""}`}>{formatUsd(a.amountMicro)}</td>
+      <td className="r hide-sm">{url ? <a className="mono" href={url} target="_blank" rel="noreferrer">{(a.arcTx ?? "").slice(0, 8)}…</a> : <span className="muted" title="Not yet in the batched decision log on Arc. This is the audit log, not the payment.">not logged yet</span>}</td>
+    </tr>
+  );
+}
+
+/** Daily budgets reset at 00:00 UTC (packages/policy periods.ts); show that moment in the viewer's time. */
+export function resetTime(now: number) {
+  const d = new Date(now);
+  const next = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1);
+  return new Date(next).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).replace(":00", "");
+}
+
+/** Time left on a held payment before the vault refunds it. */
+export function fmtLeft(ms: number) {
+  if (ms <= 0) return "refunding";
+  const m = Math.floor(ms / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  return `refunds in ${m}:${String(s).padStart(2, "0")}`;
+}
+
+/** Pause or resume one agent. The other agents keep spending from the shared wallet. */
+export function PauseButton({ agent, onChanged, compact = false }: { agent: Pick<AgentListItem, "id" | "name" | "status">; onChanged: () => Promise<unknown>; compact?: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const paused = agent.status === "paused";
+  async function toggle() {
+    setBusy(true); setErr(null);
+    try {
+      await api(`/v1/agents/${encodeURIComponent(agent.id)}/${paused ? "resume" : "pause"}`, { method: "POST", body: {} });
+      await onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't update the agent.");
+    } finally { setBusy(false); }
+  }
+  const label = compact ? (paused ? "Resume" : "Pause") : paused ? "Resume agent" : "Pause agent";
+  return (
+    <>
+      <button
+        type="button" className={`btn ${paused ? "" : "attention secondary"} ${compact ? "sm" : ""}`} onClick={toggle} disabled={busy}
+        aria-label={compact ? `${label} ${displayName(agent.name)}` : undefined}
+      >
+        <Icon name={paused ? "play" : "pause"} size={compact ? 14 : 16} />{label}
+      </button>
+      {err && <span role="alert" className="field-err">{err}</span>}
+    </>
+  );
 }

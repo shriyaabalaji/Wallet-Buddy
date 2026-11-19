@@ -17,6 +17,9 @@ const ROUTES: [method: string, path: RegExp, access: Access][] = [
   ["GET", /^\/v1\/agents\/[^/]+\/anomalies$/, "owner"],
   ["POST", /^\/v1\/agents\/[^/]+\/(pause|resume|key|notify)$/, "owner"],
   ["GET", /^\/v1\/activity$/, "owner"],
+  ["GET", /^\/v1\/holds$/, "owner"], // every agent's held payments (Overview)
+  ["GET", /^\/v1\/settings$/, "owner"], // owner-wide text settings (Settings)
+  ["POST", /^\/v1\/settings$/, "owner"],
   ["POST", /^\/v1\/rules\/(compile|dry-run)$/, "owner"],
   ["GET", /^\/v1\/policy\/[^/]+$/, "owner"],
   ["POST", /^\/v1\/policy$/, "owner"],

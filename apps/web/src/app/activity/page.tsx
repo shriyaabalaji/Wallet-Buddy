@@ -1,11 +1,13 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useState, type ReactNode } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState, type ReactNode } from "react";
 import { formatUsd } from "@agent-firewall/policy";
 import { api, txUrl, type ActivityItem } from "@/lib/api";
 import { useAgents } from "@/lib/agents";
 import { usePoll } from "@/lib/hooks";
-import { ANOMALY_LABEL, AnomalyTags, ErrorState, NoAgents, OutcomeBadge, SeverityPill, VerifyLink, displayName, shortAddr, shortTime } from "@/components";
+import { ANOMALY_LABEL, AnomalyTags, ErrorState, OutcomeBadge, SeverityPill, VerifyLink, displayName, shortAddr, shortTime } from "@/components";
+import { ProofAddresses, ProofMetrics, ProofTransactions, useProof } from "@/proof";
 
 const STATUS = [
   { id: "", label: "All" },
@@ -20,40 +22,75 @@ const DECISION = { allow: "Allowed", hold: "Held", block: "Blocked" } as const;
 
 type Filters = { agent: string; status: string; flagged: boolean; request: string | null };
 
-/** Filters live in the URL (?agent=&status=&flagged=1&request=) so a row can be linked to. */
-function readUrl(fallbackAgent: string): Filters {
-  const q = new URLSearchParams(window.location.search);
-  return { agent: q.get("agent") ?? fallbackAgent, status: q.get("status") ?? "", flagged: q.get("flagged") === "1", request: q.get("request") };
-}
-function writeUrl(f: Filters) {
-  const q = new URLSearchParams();
-  q.set("agent", f.agent);
-  if (f.status) q.set("status", f.status);
-  if (f.flagged) q.set("flagged", "1");
-  if (f.request) q.set("request", f.request);
-  window.history.replaceState(null, "", `/activity?${q}`);
+export default function ActivityPage() {
+  return <Suspense fallback={<p className="muted" role="status">Loading…</p>}><Activity /></Suspense>;
 }
 
-export default function Activity() {
-  const { agents, agentsError, refreshAgents, agentId, selectAgent } = useAgents();
-  const [f, setF] = useState<Filters | null>(null);
-  // Read the URL once agents are known (the fallback agent depends on them).
-  useEffect(() => {
-    if (agents && agentId && !f) setF(readUrl(agentId));
-  }, [agents, agentId, f]);
-  useEffect(() => { if (f) writeUrl(f); }, [f]);
+/**
+ * Everything every agent did, across the one shared wallet. Two tabs: Payments (each decision, filterable by agent)
+ * and Onchain (the Arc proof: contracts, wallets, transactions). Tab and filters live in the URL
+ * (?tab=onchain, ?agent=&status=&flagged=1&request=) so any view can be linked to.
+ */
+function Activity() {
+  const params = useSearchParams();
+  const router = useRouter();
+  const path = usePathname();
+  const onchain = params.get("tab") === "onchain";
+  const f: Filters = { agent: params.get("agent") ?? "all", status: params.get("status") ?? "", flagged: params.get("flagged") === "1", request: params.get("request") };
+  const set = (patch: Partial<Filters> & { tab?: string | null }) => {
+    const n = { ...f, ...patch };
+    const q = new URLSearchParams();
+    if (patch.tab === "onchain") q.set("tab", "onchain");
+    else {
+      if (n.agent !== "all") q.set("agent", n.agent);
+      if (n.status) q.set("status", n.status);
+      if (n.flagged) q.set("flagged", "1");
+      if (n.request) q.set("request", n.request);
+    }
+    router.replace(`${path}${q.size ? `?${q}` : ""}`, { scroll: false });
+  };
+  return (
+    <>
+      <div className="row page-head">
+        <h1>Activity</h1>
+        {!onchain && f.request && <button className="btn secondary" onClick={() => set({ request: null })}>Show all activity</button>}
+      </div>
+      <div className="tabs" role="tablist" aria-label="Activity views">
+        <button type="button" role="tab" id="tab-payments" aria-selected={!onchain} aria-controls="panel-activity" onClick={() => set({ tab: null })}>Payments</button>
+        <button type="button" role="tab" id="tab-onchain" aria-selected={onchain} aria-controls="panel-activity" onClick={() => set({ tab: "onchain" })}>Onchain</button>
+      </div>
+      <div role="tabpanel" id="panel-activity" aria-labelledby={onchain ? "tab-onchain" : "tab-payments"} className="tab-panel">
+        {onchain ? <Onchain /> : <Payments f={f} set={set} />}
+      </div>
+    </>
+  );
+}
 
-  const query = f
+function Onchain() {
+  const { data, err } = useProof();
+  return (
+    <>
+      <p className="muted small">Every transaction below is a real Arc testnet transaction, read from the chain and linked to the explorer.{data?.indexedThroughBlock ? ` Indexed through block ${data.indexedThroughBlock.toLocaleString()}.` : ""}</p>
+      {err && <div className="callout attention" role="alert"><p>Can&apos;t reach the firewall right now ({err}).</p></div>}
+      {!data && !err && <p className="muted" role="status">Loading…</p>}
+      {data && <ProofMetrics m={data.metrics} />}
+      {data && <ProofAddresses data={data} />}
+      {data && <ProofTransactions data={data} />}
+    </>
+  );
+}
+
+function Payments({ f, set }: { f: Filters; set: (patch: Partial<Filters>) => void }) {
+  const { agents, agentsError, refreshAgents } = useAgents();
+  const query = new URLSearchParams({
     // A record link resolves whichever agent the request belongs to.
-    ? new URLSearchParams({ agentId: f.request ? "all" : f.agent, limit: "200", ...(f.status ? { status: f.status } : {}), ...(f.flagged ? { anomalies: "1" } : {}), ...(f.request ? { requestId: f.request } : {}) }).toString()
-    : "";
-  const { data, error, refresh } = usePoll(() => (f ? api<{ items: ActivityItem[] }>(`/v1/activity?${query}`) : Promise.resolve(null)), 5000, query);
+    agentId: f.request ? "all" : f.agent, limit: "200",
+    ...(f.status ? { status: f.status } : {}), ...(f.flagged ? { anomalies: "1" } : {}), ...(f.request ? { requestId: f.request } : {}),
+  }).toString();
+  const { data, error, refresh } = usePoll(() => api<{ items: ActivityItem[] }>(`/v1/activity?${query}`), 5000, query);
 
   if (!agents) return agentsError ? <ErrorState error={agentsError} onRetry={refreshAgents} /> : <p className="muted" role="status">Loading…</p>;
-  if (!agentId) return <NoAgents />;
-  if (!f) return <p className="muted" role="status">Loading…</p>;
 
-  const set = (patch: Partial<Filters>) => setF({ ...f, ...patch });
   const items = data?.items ?? null;
   const record = f.request ? items?.[0] ?? null : null;
   const nameOf = (id: string) => displayName(agents.find((a) => a.id === id)?.name ?? id);
@@ -61,16 +98,11 @@ export default function Activity() {
 
   return (
     <>
-      <div className="row">
-        <h1>Activity</h1>
-        {f.request && <button className="btn secondary" onClick={() => set({ request: null })}>Show all activity</button>}
-      </div>
-
       {!f.request && (
         <div className="filter-bar">
           <div className="field inline">
             <label htmlFor="f-agent" className="muted small">Agent</label>
-            <select id="f-agent" value={f.agent} onChange={(e) => { set({ agent: e.target.value }); if (e.target.value !== "all") selectAgent(e.target.value); }}>
+            <select id="f-agent" value={f.agent} onChange={(e) => set({ agent: e.target.value })}>
               <option value="all">All agents</option>
               {agents.map((a) => <option key={a.id} value={a.id}>{displayName(a.name)}</option>)}
             </select>
@@ -85,25 +117,25 @@ export default function Activity() {
       {error && <ErrorState error={error} onRetry={refresh} />}
       {!items && !error && <p className="muted" role="status">Loading…</p>}
 
-      {f.request && items && (record ? <Record a={record} agentName={nameOf(record.agentId)} onChange={refresh} /> : <p className="muted">No record with that id.</p>)}
+      {f.request && items && (record ? <Record a={record} agentName={nameOf(record.agentId)} onChange={refresh} onBack={() => set({ request: null })} /> : <p className="muted">No record with that id.</p>)}
 
       {!f.request && items && (
         <div className="table-wrap">
           <table className={`activity ${allAgents ? "wide" : ""}`}>
             <thead>
-              <tr><th>Time</th><th>{allAgents ? "Agent · task" : "Task"}</th><th>Recipient · why</th><th>Amount</th><th>Decision · status</th><th>Unusual</th><th>Arc</th></tr>
+              <tr><th>Time</th><th>{allAgents ? "Agent · task" : "Task"}</th><th>Recipient · why</th><th>Amount</th><th>Decision · status</th><th>Arc</th><th>Unusual</th></tr>
             </thead>
             <tbody>
               {items.length === 0 && <tr><td colSpan={7} className="muted">Nothing matches these filters.</td></tr>}
               {items.map((a) => (
                 <tr key={a.requestId}>
                   <td className="mono nowrap"><button className="linkish mono" onClick={() => set({ request: a.requestId })} title="Open the full record">{shortTime(a.at)}</button></td>
-                  <td className="nowrap">{allAgents && <span className="under">{nameOf(a.agentId)}</span>}<span className={`mono ${allAgents ? "muted small" : ""}`}>{a.taskId}</span></td>
+                  <td className="nowrap">{allAgents && <Link className="under" href={`/agents?id=${encodeURIComponent(a.agentId)}`}>{nameOf(a.agentId)}</Link>}<span className={`mono ${allAgents ? "muted small" : ""}`}>{a.taskId}</span></td>
                   <td className="detail"><span className="mono under" title={a.recipient}>{shortAddr(a.recipient)}</span><span className="muted small under">{a.reason}</span>{a.flags.length > 0 && <span className="warn-text small under">{a.flags.join(" ")}</span>}</td>
                   <td className="mono nowrap">{formatUsd(a.amountMicro)}</td>
                   <td className="nowrap"><OutcomeBadge outcome={a.outcome} status={a.status} settlement={a.settlement} /><span className="muted small under">{DECISION[a.outcome]}{a.ruleId ? ` · ${humanize(a.ruleId)}` : ""}</span></td>
-                  <td><AnomalyTags anomalies={a.anomalies} /></td>
                   <td><ArcLinks a={a} /></td>
+                  <td><AnomalyTags anomalies={a.anomalies} /></td>
                 </tr>
               ))}
             </tbody>
@@ -127,10 +159,10 @@ function ArcLinks({ a }: { a: ActivityItem }) {
   );
 }
 
-function Record({ a, agentName, onChange }: { a: ActivityItem; agentName: string; onChange: () => Promise<void> }) {
+function Record({ a, agentName, onChange, onBack }: { a: ActivityItem; agentName: string; onChange: () => Promise<void>; onBack: () => void }) {
   const rows: [string, ReactNode][] = [
     ["When", new Date(a.at).toLocaleString()],
-    ["Agent", <>{agentName} <span className="mono muted">({a.agentId})</span></>],
+    ["Agent", <><Link href={`/agents?id=${encodeURIComponent(a.agentId)}`}>{agentName}</Link> <span className="mono muted">({a.agentId})</span></>],
     ["Task", <span className="mono">{a.taskId}</span>],
     ["Recipient", <span className="mono" style={{ overflowWrap: "anywhere" }}>{a.recipient}</span>],
     ["Amount", <span className="mono">{formatUsd(a.amountMicro)}</span>],
@@ -165,7 +197,7 @@ function Record({ a, agentName, onChange }: { a: ActivityItem; agentName: string
       </div>
       {a.settlement?.needsReconciliation && <Reconcile a={a} onDone={onChange} />}
       {(a.arcTx || a.arcTxUrl || a.resolveTx || a.resolveTxUrl) && <p className="lockline">Verified on Arc: <ArcLinks a={a} /></p>}
-      <div><Link className="btn secondary" href="/">Back to overview</Link></div>
+      <div><button type="button" className="btn secondary" onClick={onBack}>Back to activity</button></div>
     </section>
   );
 }

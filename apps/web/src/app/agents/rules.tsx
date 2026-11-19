@@ -1,16 +1,11 @@
 "use client";
-import { PasskeySetup } from "@/passkey";
-import { useEffect, useState } from "react";
+// One agent's rules (Agents page, Rules tab): what's in force, and the add-a-rule flow (compile → review → quick test → save).
+import { useState } from "react";
 import { describeRule, usdToMicro, type AnomalySeverity, type Rule } from "@agent-firewall/policy";
-import {
-  api, txUrl,
-  type Ambiguity, type DryRunResult, type NotifyEvent, type PolicyInfo, type RuleView,
-} from "@/lib/api";
+import { ApiError, api, txUrl, type Ambiguity, type DryRunResult, type PolicyInfo, type RuleView } from "@/lib/api";
 import { useAgents } from "@/lib/agents";
 import { usePoll } from "@/lib/hooks";
-import { ErrorState, Icon, NoAgents, VerifyLink } from "@/components";
-import { ApiError } from "@/lib/api";
-import { formatPhone, normalizePhone } from "./phone";
+import { ErrorState, Icon, VerifyLink } from "@/components";
 
 const DEMO_TEXT = "Up to $10 for this task, $5 a day. Text me before anything over $1. Only pay sportsfeed and oddsapi.";
 const OUTCOME_TEXT = { allow: "Pays", hold: "Texts you first", block: "Blocked" } as const;
@@ -62,18 +57,11 @@ function sentenceFor(rule: Rule, views: RuleView[]) {
   return views.find((v) => v.ruleId === rule.id)?.sentence ?? describeRule(rule);
 }
 
-type SavedPolicy = { policy: (PolicyInfo & { rules: Rule[] }) | null; views: RuleView[]; notify: { phone: string | null; events: NotifyEvent[] } | null };
+type SavedPolicy = { policy: (PolicyInfo & { rules: Rule[] }) | null; views: RuleView[] };
 
-export default function RulesPage() {
-  const { agents, agentsError, refreshAgents, agentId } = useAgents();
-  if (!agents) return agentsError ? <ErrorState error={agentsError} onRetry={refreshAgents} /> : <p className="muted" role="status">Loading…</p>;
-  if (!agentId) return <NoAgents />;
-  // Keyed by agent: switching agents starts a fresh draft, so rules can't be saved to the wrong agent.
-  return <RulesFor key={agentId} agentId={agentId} />;
-}
-
-function RulesFor({ agentId }: { agentId: string }) {
-  const { agent, refreshAgents, health } = useAgents();
+/** Keyed by agent id where it's used, so switching agents starts a fresh draft and rules can't be saved to the wrong agent. */
+export function AgentRules({ agentId }: { agentId: string }) {
+  const { refreshAgents, health } = useAgents();
   const enc = encodeURIComponent(agentId);
   const current = usePoll(() => api<SavedPolicy>(`/v1/policy/${enc}`), 30000, agentId);
   const [text, setText] = useState(DEMO_TEXT);
@@ -87,7 +75,6 @@ function RulesFor({ agentId }: { agentId: string }) {
   const [busy, setBusy] = useState<"compile" | "save" | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [saved, setSaved] = useState<PolicyInfo | null>(null);
-  const [pausing, setPausing] = useState(false);
 
   const fail = (e: unknown) => setError(e instanceof ApiError ? e : new ApiError(e instanceof Error ? e.message : "Something went wrong.", 0));
   const clearDraft = () => { setRules(null); setTests(null); setAmbiguities([]); setEditing(null); };
@@ -128,7 +115,7 @@ function RulesFor({ agentId }: { agentId: string }) {
     if (!rules) return;
     setBusy("save"); setError(null);
     try {
-      // No `notify`: the firewall leaves text settings untouched when it's omitted. They're saved in their own panel.
+      // No `notify`: the firewall leaves text settings untouched when it's omitted. Texts are set in Settings.
       const res = await api<{ policy: PolicyInfo }>("/v1/policy", { method: "POST", body: { agentId, rules, confirmed: true } });
       setSaved(res.policy);
       clearDraft();
@@ -145,32 +132,10 @@ function RulesFor({ agentId }: { agentId: string }) {
     await runTests(p.policy.rules);
   }
 
-  const paused = agent?.status === "paused";
-  async function togglePause() {
-    setPausing(true); setError(null);
-    try {
-      await api(`/v1/agents/${enc}/${paused ? "resume" : "pause"}`, { method: "POST", body: paused ? {} : { reason: "Paused from the Rules page" } });
-      await refreshAgents();
-    } catch (e) { fail(e); } finally { setPausing(false); }
-  }
-
   const arcLive = Boolean(health?.arc?.registry);
 
   return (
     <>
-      <section className="row" aria-label="Agent">
-        <div>
-          <p className="crumbs">Rules for <span className="mono">{agentId}</span></p>
-          <h1>Your rules</h1>
-        </div>
-        <div className="toolbar">
-          <button className={`btn ${paused ? "" : "attention secondary"}`} onClick={togglePause} disabled={pausing || !agent}>
-            <Icon name={paused ? "play" : "pause"} size={16} />{paused ? "Resume agent" : "Pause agent"}
-          </button>
-        </div>
-      </section>
-      {paused && <div className="callout attention" role="status"><strong>This agent is paused</strong><p>It can&apos;t spend anything until you resume it{agent?.pausedReason ? `. Reason: ${agent.pausedReason}` : ""}.</p></div>}
-
       <div className="rules-split">
         <div className="rules-col">
           <section className="panel" aria-labelledby="s0">
@@ -196,7 +161,6 @@ function RulesFor({ agentId }: { agentId: string }) {
               </div>
             )}
           </section>
-          <div className="passkey-slot"><PasskeySetup /></div>
         </div>
 
         <div className="rules-col">
@@ -276,99 +240,8 @@ function RulesFor({ agentId }: { agentId: string }) {
               </div>
             )}
           </section>
-
-          <TextMessages agentId={agentId} saved={current.data ?? null} refresh={current.refresh} twilio={health?.twilio} arcLive={arcLive} />
         </div>
       </div>
     </>
   );
 }
-
-const EVENT_LABEL: Record<NotifyEvent, string> = { hold: "Held for approval", budget80: "80% of budget used", paused: "Agent paused" };
-const EVENTS = Object.keys(EVENT_LABEL) as NotifyEvent[];
-// What the firewall does when nothing is stored: approvals.ts texts holds only.
-const DEFAULT_EVENTS: NotifyEvent[] = ["hold"];
-
-/**
- * Owner text-message settings, saved on their own (POST /v1/agents/:id/notify): no rules save, no Arc re-commit.
- */
-function TextMessages({ agentId, saved, refresh, twilio, arcLive }: {
-  agentId: string;
-  saved: SavedPolicy | null;
-  refresh: () => unknown;
-  twilio: boolean | undefined;
-  arcLive: boolean;
-}) {
-  const [phone, setPhone] = useState("");
-  const [events, setEvents] = useState<NotifyEvent[]>(DEFAULT_EVENTS);
-  const [loaded, setLoaded] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [phoneErr, setPhoneErr] = useState<string | null>(null);
-  const [error, setError] = useState<ApiError | null>(null);
-  const [done, setDone] = useState<string | null>(null);
-
-  // Fill the form once from what the firewall has stored; later polls don't overwrite what the owner is typing.
-  useEffect(() => {
-    if (loaded || !saved) return;
-    if (saved.notify) {
-      setPhone(saved.notify.phone ? formatPhone(saved.notify.phone) : "");
-      setEvents(saved.notify.events);
-    }
-    setLoaded(true);
-  }, [saved, loaded]);
-
-  const toggle = (e: NotifyEvent, on: boolean) => {
-    setDone(null);
-    setEvents((cur) => (on ? (cur.includes(e) ? cur : [...cur, e]) : cur.filter((x) => x !== e)));
-  };
-
-  async function save() {
-    setError(null); setDone(null);
-    const normalized = normalizePhone(phone);
-    if (!normalized) { setPhoneErr("Include the country code, like +1 604 555 0100."); return; }
-    setPhoneErr(null); setBusy(true);
-    try {
-      await api(`/v1/agents/${encodeURIComponent(agentId)}/notify`, {
-        method: "POST",
-        body: { phone: normalized, events: EVENTS.filter((e) => events.includes(e)) },
-      });
-      setPhone(formatPhone(normalized));
-      setDone(events.length ? `Saved. Texts go to ${formatPhone(normalized)}.` : "Saved. No texts will be sent.");
-      await refresh();
-    } catch (e) {
-      setError(e instanceof ApiError ? e : new ApiError(e instanceof Error ? e.message : "Couldn't save.", 0));
-    } finally { setBusy(false); }
-  }
-
-  return (
-    <section className="panel" aria-labelledby="sms">
-      <h2 id="sms">Text messages</h2>
-      <div className="field">
-        <label htmlFor="phone">Your phone number</label>
-        <input
-          id="phone" type="tel" autoComplete="tel" inputMode="tel" placeholder="+1 604 555 0100"
-          value={phone} onChange={(e) => { setPhone(e.target.value); setPhoneErr(null); setDone(null); }}
-          aria-invalid={phoneErr ? true : undefined} aria-describedby={phoneErr ? "phone-err" : undefined}
-        />
-        {phoneErr && <p id="phone-err" role="alert" className="field-err">{phoneErr}</p>}
-      </div>
-      <fieldset className="checks">
-        <legend className="muted small">Text me when</legend>
-        {EVENTS.map((e) => (
-          <label key={e} className="check"><input type="checkbox" checked={events.includes(e)} onChange={(ev) => toggle(e, ev.target.checked)} /> {EVENT_LABEL[e]}</label>
-        ))}
-      </fieldset>
-      <div className="toolbar sms-actions">
-        <button className="btn" onClick={save} disabled={busy || !phone.trim()}>{busy ? "Saving…" : "Save"}</button>
-        {done ? <span className="saved-note" role="status"><Icon name="check" size={16} />{done}</span>
-          : null}
-      </div>
-      {error && <ErrorState error={error} />}
-      <p className="muted small">
-        Approving a held payment still needs your passkey. Reply NO to a text to cancel that payment, or PAUSE to stop your agent.
-        {twilio === false && <><br />Texting isn&apos;t set up on the firewall yet, so texts go to its log instead of your phone.</>}
-      </p>
-    </section>
-  );
-}
-

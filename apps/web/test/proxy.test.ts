@@ -68,6 +68,30 @@ describe("proxy: owner routes", () => {
     expect(calls[0]!.url).toBe("http://firewall.test/v1/activity?agentId=research-agent&filter=all&limit=100");
   });
 
+  it("forwards the global holds and settings routes as owner routes, and only with a session", async () => {
+    const cases = [["GET", "/v1/holds"], ["GET", "/v1/settings"], ["POST", "/v1/settings"]] as const;
+    for (const [m, p] of cases) {
+      expect(classify(m, segs(p)), `${m} ${p}`).toEqual({ path: p, access: "owner" });
+      const f = fakeFirewall();
+      const body = m === "POST" ? '{"phone":"+16045550100","events":["hold"]}' : undefined;
+      expect((await proxy(req(m, `/api/fw${p}`, { body }), segs(p), env, f)).status, `${m} ${p} without session`).toBe(401);
+      const r = await proxy(req(m, `/api/fw${p}`, { cookie: createSession(env), body }), segs(p), env, f);
+      expect(r.status, `${m} ${p}`).toBe(200);
+      expect(calls.at(-1)!.url).toBe(`http://firewall.test${p}`);
+      expect((calls.at(-1)!.init.headers as Record<string, string>).Authorization).toBe(`Bearer ${OWNER_TOKEN}`);
+    }
+    // Settings changes are state-changing: refused cross-site like every other POST.
+    const f = fakeFirewall();
+    const before = calls.length;
+    expect((await proxy(req("POST", "/api/fw/v1/settings", { cookie: createSession(env), origin: "http://evil.test", body: "{}" }), segs("/v1/settings"), env, f)).status).toBe(403);
+    expect(calls.length).toBe(before);
+    // Only the exact paths: no per-hold or nested settings routes, and no other methods.
+    expect(classify("GET", segs("/v1/holds/req_1"))).toBeNull();
+    expect(classify("POST", segs("/v1/holds"))).toBeNull();
+    expect(classify("DELETE", segs("/v1/settings"))).toBeNull();
+    expect(classify("GET", segs("/v1/settings/phone"))).toBeNull();
+  });
+
   it("fails closed when the dashboard has no owner token configured", async () => {
     const f = fakeFirewall();
     const r = await proxy(req("GET", "/api/fw/health", { cookie: createSession(env) }), ["health"], { ...env, FIREWALL_OWNER_TOKEN: "" }, f);

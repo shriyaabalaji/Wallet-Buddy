@@ -140,7 +140,7 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
     </div>
   );
   return (
-    <button type="button" className={`flip ${flipped ? "flipped" : ""}`} aria-pressed={flipped} aria-label={`${label}: ${value}. ${sub}`} onClick={() => setFlipped((f) => !f)}>
+    <button type="button" className={`stat-flip ${flipped ? "flipped" : ""}`} aria-pressed={flipped} aria-label={`${label}: ${value}. ${sub}`} onClick={() => setFlipped((f) => !f)}>
       <span className="flip-inner" aria-hidden="true">
         <span className="card flip-face">
           <span className="label">{label}</span>

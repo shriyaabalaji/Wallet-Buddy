@@ -31,7 +31,7 @@ a { color: var(--blue); }
 .kv span:last-child { color: var(--text); }
 .side-foot { margin-top: auto; padding: 0 8px; display: flex; flex-direction: column; gap: 4px; font-size: .85rem; }
 .side-foot .status { font-weight: 500; }
-.shell .page { max-width: 1280px; width: 100%; margin: 0; padding: 28px 28px 64px; gap: 22px; }
+.shell .page { max-width: 1680px; width: 100%; margin: 0; padding: 28px 28px 64px; gap: 22px; }
 @media (max-width: 860px) {
   .shell { grid-template-columns: minmax(0, 1fr); }
   .sidebar { position: static; height: auto; margin: 12px 12px 0; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; }
@@ -408,15 +408,15 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px
 .agent-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--muted); }
 
 /* Onchain metric cards flip on hover (or tap / Enter) to show their breakdown. */
-.flip { all: unset; display: block; perspective: 900px; cursor: pointer; border-radius: var(--r-card); min-height: 108px; }
-.flip:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+.stat-flip { all: unset; display: block; perspective: 900px; cursor: pointer; border-radius: var(--r-card); min-height: 108px; }
+.stat-flip:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
 .flip-inner { position: relative; display: grid; height: 100%; transition: transform .5s cubic-bezier(.2, .7, .2, 1); transform-style: preserve-3d; }
 .flip-face { grid-area: 1 / 1; backface-visibility: hidden; -webkit-backface-visibility: hidden; height: 100%; box-sizing: border-box; }
 .flip-back { transform: rotateY(180deg); background: var(--blue-tint); border-color: var(--sky); }
 .flip-detail { font-size: .95rem; line-height: 1.4; color: var(--text); }
-.flip.flipped .flip-inner { transform: rotateY(180deg); }
-@media (hover: hover) { .flip:hover .flip-inner { transform: rotateY(180deg); } }
-.tab-panel .proof-stats .flip .card { padding: 16px 18px; gap: 4px; }
+.stat-flip.flipped .flip-inner { transform: rotateY(180deg); }
+@media (hover: hover) { .stat-flip:hover .flip-inner { transform: rotateY(180deg); } }
+.tab-panel .proof-stats .stat-flip .card { padding: 16px 18px; gap: 4px; }
 
 /* Overview metric cards open as a pop-up that flips and flies to the center. */
 .pop-card { cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s; }
@@ -449,6 +449,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px
 .flow .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .flow .panel-head h2 { margin: 0; font-size: 1.05rem; }
 .flow .badge.quiet { color: var(--muted); background: var(--soft); }
+.flow .badge.quiet::before { display: none; }
 .flow .badge.live { animation: flow-pulse 1.2s ease-in-out 3; }
 .flow-stage { position: relative; }
 .flow-stage svg { display: block; width: 100%; height: auto; max-height: 300px; overflow: visible; font-family: var(--font-inter), system-ui, sans-serif; }

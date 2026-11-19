@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { formatUsd } from "@agent-firewall/policy";
 import { api, type AgentListItem, type HeldPayment } from "@/lib/api";
 import { useAgents } from "@/lib/agents";
+import { PaymentFlow } from "@/flow";
 import { useNow, usePoll } from "@/lib/hooks";
 import { BalanceCard, ErrorState, Icon, Money, PauseButton, PopCard, displayName, fmtLeft, shortAddr } from "@/components";
 
@@ -114,6 +115,8 @@ export default function Home() {
         </section>
       )}
       {holds.error && !holds.data && <ErrorState error={holds.error} onRetry={holds.refresh} />}
+
+      <PaymentFlow agents={agents} />
 
       <AgentCarousel agents={agents} onChanged={refreshAgents} />
     </>

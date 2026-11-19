@@ -443,3 +443,45 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px
   .flip-inner { transition: none; }
   .pop-dialog[open] .pop-body, .pop-dialog::backdrop { animation: pop-fade .15s ease both; }
 }
+
+/* Overview: live payment flow (flow.tsx). */
+.flow { gap: 10px; padding-bottom: 16px; }
+.flow .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.flow .panel-head h2 { margin: 0; font-size: 1.05rem; }
+.flow .badge.quiet { color: var(--muted); background: var(--soft); }
+.flow .badge.live { animation: flow-pulse 1.2s ease-in-out 3; }
+.flow-stage { position: relative; }
+.flow-stage svg { display: block; width: 100%; height: auto; max-height: 300px; overflow: visible; font-family: var(--font-inter), system-ui, sans-serif; }
+.flow .lane { fill: none; stroke: var(--line); stroke-width: 2; stroke-dasharray: 2 6; stroke-linecap: round; transition: stroke .2s; }
+.flow .lane.on { stroke: var(--sky); stroke-dasharray: none; }
+.flow .fw rect { fill: var(--blue); stroke: var(--blue); stroke-width: 3; transition: fill .2s, stroke .2s; }
+.flow .fw rect.hit-block { stroke: var(--orange); fill: #c26d0a; }
+.flow .fw rect.hit-hold { stroke: var(--gold); }
+.flow .fw-shield { fill: none; stroke: #fff; stroke-width: 2.4; stroke-linejoin: round; }
+.flow .fw-label { fill: #fff; font-family: var(--font-outfit), sans-serif; font-weight: 600; font-size: 17px; }
+.flow .agent { cursor: pointer; outline: none; }
+.flow .agent .body { fill: var(--blue); transition: fill .2s; }
+.flow .agent .halo { fill: var(--blue-wash); transition: transform .25s; }
+.flow .agent.on .halo, .flow .agent:focus-visible .halo { fill: var(--sky); transform: scale(1.15); }
+.flow .agent.paused .body { fill: #b9b4c6; }
+.flow .agent.paused .halo { fill: var(--soft); }
+.flow .agent-label { fill: var(--text); font-size: 15px; font-weight: 500; }
+.flow .agent.paused .agent-label { fill: var(--muted); }
+.flow .seller rect { fill: var(--blue-tint); stroke: var(--sky); stroke-width: 1.5; }
+.flow .seller.unknown rect { fill: var(--orange-tint); stroke: var(--gold); }
+.flow .seller-label { fill: var(--text); font-size: 15px; font-weight: 500; }
+.flow .pay circle { stroke: #fff; stroke-width: 2.5; }
+.flow .pay text { font-size: 12px; font-weight: 600; font-family: var(--font-outfit), sans-serif; paint-order: stroke; stroke: var(--surface); stroke-width: 4px; }
+.flow .pay.paid circle { fill: var(--usdc); } .flow .pay.paid text { fill: var(--blue-ink); }
+.flow .pay.held circle { fill: var(--gold); } .flow .pay.held text { fill: var(--orange); }
+.flow .pay.blocked circle { fill: var(--orange); } .flow .pay.blocked text { fill: var(--orange); }
+.flow-tip { position: absolute; transform: translate(8px, -50%); background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; font-size: .85rem; box-shadow: 0 12px 30px -16px rgba(0, 60, 120, .35); pointer-events: none; white-space: nowrap; z-index: 2; }
+.flow-tip span { color: var(--muted); }
+.flow-tip .warn-text { color: var(--orange); }
+.flow-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: .82rem; }
+.flow-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.flow-legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.flow-legend i.paid { background: var(--usdc); } .flow-legend i.held { background: var(--gold); } .flow-legend i.blocked { background: var(--orange); }
+.flow-legend .muted { margin-left: auto; }
+@keyframes flow-pulse { 50% { box-shadow: 0 0 0 6px rgba(26, 163, 255, .18); } }
+@media (max-width: 640px) { .flow { display: none; } }

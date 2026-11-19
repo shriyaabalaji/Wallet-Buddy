@@ -287,3 +287,17 @@ table.activity .tags { flex-direction: column; align-items: flex-start; }
 .col:nth-last-child(-n+3) .tip { left: auto; right: 0; transform: translate(0, -8px); }
 .col:nth-child(-n+2) .tip { left: 0; transform: translate(0, -8px); }
 @media (max-width: 860px) { .nav { flex-wrap: wrap; } .nav a { padding: 0 10px; min-height: 40px; } }
+
+/* overview v2: balance, spend left, stopped; then recent payments */
+.glance { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: stretch; }
+.glance > .card { min-width: 0; }
+.glance .foot { margin-top: auto; }
+@media (max-width: 1180px) { .glance { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .glance > .balance { grid-column: span 2; } }
+@media (max-width: 760px) { .glance { grid-template-columns: minmax(0, 1fr); } .glance > .balance { grid-column: auto; } }
+.hero.balance { min-height: 0; padding: 22px; border-radius: var(--r-card); gap: 14px; }
+.hero.balance h2 { margin: 0; font-size: 1.05rem; color: #fff; }
+.hero.balance .money.md { color: #fff; }
+.hero.balance a { color: #fff; text-decoration: underline; text-decoration-color: rgba(172, 198, 233, .5); text-underline-offset: 3px; }
+.hero.balance .row3 { flex-wrap: wrap; white-space: normal; align-items: center; }
+.balance-meta { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.balance-meta > span { display: inline-flex; align-items: center; gap: 6px; }

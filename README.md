@@ -130,10 +130,7 @@ Budgets are reserved atomically (`BEGIN IMMEDIATE`). Tests cover two processes r
 With little history they fall back to absolute thresholds (`ANOMALY_*` overrides). Signals never allow anything. They only change a decision through an `anomalyGuard` rule (hold, or block), and a hold never overrides a block. Agents never see the measured values (that would teach a hijacked agent to stay just under them); the owner does.
 
 **Multi-agent dashboard** (`apps/web`, owner sign-in):
-- an agent switcher, with per-agent overview: today's paid, in-progress and stopped money, budgets, an 8-hour chart, waiting approvals, rules, and "Locked on Arc" verification;
-- an "Unusual activity" panel;
-- funding and Arc status;
-- "Price check";
+- an agent switcher, with per-agent overview: wallet balance (Gateway available, treasury, top-up left today), what the agent can still spend today, waiting approvals, what got stopped (and how many requests were flagged as unusual), and recent payments;
 - activity filters: agent, status, flagged, request id, needs reconciliation;
 - settlement-evidence labels: simulated, seller accepted / no reference, unverified, confirmed onchain;
 - agent registration and passkey approvals.

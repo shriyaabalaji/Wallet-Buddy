@@ -9,6 +9,7 @@ import { arcStatus, commitPolicyOnArc, logDecisionsOnArc, vaultFunding } from ".
 import { fundingStatus } from "./funding";
 import { currentDepositInfo, payerGatewayBalance } from "./deposit";
 import { loadConnectedWallet } from "./wallet";
+import { SellerError, listSellers, loadSellers, removeSeller, upsertSeller } from "./sellers";
 import { ConnectError, acceptTerms, connectFromSession, disconnect, sendCode, verifyCode, walletStatus } from "./circle-connect";
 import {
   approvalOptions,
@@ -291,6 +292,16 @@ route("POST", "/v1/settings", "owner", ({ db, body }) => {
   }
   setOwnerSettings(db, { ...(typeof body?.phone === "string" ? { phone: raw || null } : {}), events, textApprove });
   return getOwnerSettings(db);
+});
+// The seller registry (sellers.ts): which names agents may pay, and the wallet each one must be paid at.
+const sellerErr = (e: unknown): never => { if (e instanceof SellerError) throw new HttpError(400, e.message); throw e; };
+route("GET", "/v1/sellers", "owner", ({ db }) => ({ items: listSellers(db) }));
+route("POST", "/v1/sellers", "owner", ({ db, body }) => {
+  try { return upsertSeller(db, body ?? {}); } catch (e) { return sellerErr(e); }
+});
+route("DELETE", "/v1/sellers/:name", "owner", ({ db, params }) => {
+  if (!removeSeller(db, params.name!)) throw new HttpError(404, "No seller with that name.");
+  return { ok: true };
 });
 // Every agent's held payments, for the global Overview.
 route("GET", "/v1/holds", "owner", ({ db }) => ({ items: allPendingHolds(db) }));
@@ -680,6 +691,7 @@ function cors(res: ServerResponse) {
 
 export function createApp(db: DB, auth: AuthConfig = authConfig) {
   loadConnectedWallet(db);
+  loadSellers(db);
   // Last-resort guard: any error escaping the handler (e.g. the client aborting mid-body) must not crash the firewall.
   return createServer((req, res) =>
     void handle(db, auth, req, res).catch((e) => {

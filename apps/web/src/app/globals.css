@@ -559,3 +559,9 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px
 /* The Settings title stays put while the sections scroll under it. */
 .settings-title { position: sticky; top: 0; z-index: 3; margin: -28px 0 0; padding: 28px 0 14px; background: var(--bg); }
 @media (max-width: 900px) { .settings-title { margin-top: -20px; padding-top: 20px; } }
+.seller-ctl { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.seller-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 10px; width: 100%; max-width: 640px; }
+.seller-form input:nth-of-type(3), .seller-form .toolbar, .seller-form .field-err { grid-column: 1 / -1; }
+@media (max-width: 600px) { .seller-form { grid-template-columns: minmax(0, 1fr); } }
+.seller-picks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.seller-picks .pill { cursor: pointer; border: 1px solid var(--sky); background: var(--blue-tint); color: var(--blue-ink); font: inherit; font-size: .82rem; }

@@ -20,6 +20,9 @@ const ROUTES: [method: string, path: RegExp, access: Access][] = [
   ["GET", /^\/v1\/holds$/, "owner"], // every agent's held payments (Overview)
   ["GET", /^\/v1\/settings$/, "owner"], // owner-wide text settings (Settings)
   ["POST", /^\/v1\/settings$/, "owner"],
+  ["GET", /^\/v1\/sellers$/, "owner"], // seller registry (Settings → Sellers)
+  ["POST", /^\/v1\/sellers$/, "owner"],
+  ["DELETE", /^\/v1\/sellers\/[^/]+$/, "owner"],
   ["POST", /^\/v1\/rules\/(compile|dry-run)$/, "owner"],
   ["GET", /^\/v1\/policy\/[^/]+$/, "owner"],
   ["POST", /^\/v1\/policy$/, "owner"],

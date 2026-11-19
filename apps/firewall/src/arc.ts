@@ -1,5 +1,6 @@
 // Arc testnet adapter (viem). Every function is a no-op returning null when Arc isn't configured,
 // so the firewall runs locally without keys. Contract ABIs match /contracts/src.
+import { sellerAddress } from "./sellers";
 import { createPublicClient, createWalletClient, defineChain, http, parseAbi, parseGwei, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { idToBytes32, microToErc20 } from "@agent-firewall/policy";
@@ -101,12 +102,9 @@ export async function logDecisionsOnArc(
   ]);
 }
 
-/** Vault holds need a real 0x recipient. Service ids (e.g. "sportsfeed") are resolved via SELLER_ADDRESSES. */
+/** Vault holds need a real 0x recipient. Seller names (e.g. "sportsfeed") come from the seller registry (sellers.ts). */
 export function resolveRecipient(recipient: string): Hex | null {
-  if (/^0x[0-9a-fA-F]{40}$/.test(recipient)) return recipient as Hex;
-  const map = Object.fromEntries((process.env.SELLER_ADDRESSES ?? "").split(",").filter(Boolean).map((p) => p.split("=") as [string, string]));
-  const a = map[recipient.toLowerCase()];
-  return a && /^0x[0-9a-fA-F]{40}$/.test(a) ? (a as Hex) : null;
+  return sellerAddress(recipient);
 }
 
 /** How much USDC the vault may still pull from the treasury (hold() uses transferFrom), plus the treasury balance. 6-decimal micro units. */

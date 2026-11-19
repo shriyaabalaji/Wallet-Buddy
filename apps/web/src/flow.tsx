@@ -2,7 +2,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatUsd } from "@agent-firewall/policy";
-import { api, type ActivityItem, type AgentListItem } from "@/lib/api";
+import { api, type ActivityItem, type AgentListItem, type Seller } from "@/lib/api";
 import { usePoll } from "@/lib/hooks";
 import { BuddyGlyph, displayName, shortAddr } from "@/components";
 
@@ -30,6 +30,8 @@ export function PaymentFlow({ agents }: { agents: AgentListItem[] }) {
   const router = useRouter();
   const feed = usePoll(() => api<{ items: ActivityItem[] }>("/v1/activity?agentId=all&limit=60"), 4000);
   const items = feed.data?.items ?? null;
+  const reg = usePoll(() => api<{ items: Seller[] }>("/v1/sellers"), 60000);
+  const registered = new Set((reg.data?.items ?? []).map((x) => x.name));
 
   // Columns: the agents and sellers in recent activity, busiest first.
   const { cols, sellers } = useMemo(() => {
@@ -193,11 +195,13 @@ export function PaymentFlow({ agents }: { agents: AgentListItem[] }) {
 
             {/* sellers */}
             {sellers.map((s, j) => {
-              const unknown = /^0x[0-9a-f]{6,}$/i.test(s);
+              const raw = /^0x[0-9a-f]{6,}$/i.test(s);
+              // Anything that isn't a registered seller (a raw address, or a name nobody registered) is marked unknown.
+              const unknown = s !== "__other" && (raw || (reg.data !== null && !registered.has(s.toLowerCase())));
               return (
                 <g key={s} transform={`translate(${SX},${sy[j]})`} className={`seller ${unknown ? "unknown" : ""}`}>
                   <rect x={-14} y={-14} width={28} height={28} rx={9} />
-                  <text x={24} y={5} className="seller-label">{s === "__other" ? "Other sellers" : unknown ? shortAddr(s) : s}</text>
+                  <text x={24} y={5} className="seller-label">{s === "__other" ? "Other sellers" : raw ? `Unknown wallet ${s.slice(0, 6)}…${s.slice(-4)}` : unknown ? `${s} (not registered)` : s}</text>
                 </g>
               );
             })}

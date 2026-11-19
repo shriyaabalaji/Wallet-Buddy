@@ -158,6 +158,9 @@ export class ApiError extends Error {
 }
 
 /** Fetch JSON from the firewall. Network failures become ApiError(status 0) so the UI can show a friendly state. */
+/** A registered seller (GET /v1/sellers): the name agents put in `recipient` and the wallet it must be paid at. */
+export type Seller = { name: string; address: string; url: string | null; addedAt: string; source: "dashboard" | "env" };
+
 export async function api<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
   let res: Response;
   try {

@@ -1,8 +1,8 @@
 "use client";
 // One agent's rules (Agents page, Rules tab): what's in force, and the add-a-rule flow (compile → review → quick test → save).
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { describeRule, usdToMicro, type AnomalySeverity, type Rule } from "@agent-firewall/policy";
-import { ApiError, api, txUrl, type Ambiguity, type DryRunResult, type PolicyInfo, type RuleView } from "@/lib/api";
+import { ApiError, api, txUrl, type Ambiguity, type DryRunResult, type PolicyInfo, type RuleView, type Seller } from "@/lib/api";
 import { useAgents } from "@/lib/agents";
 import { usePoll } from "@/lib/hooks";
 import { ErrorState, Icon, VerifyLink } from "@/components";
@@ -206,6 +206,7 @@ export function AgentRules({ agentId }: { agentId: string }) {
                             <button className="btn" onClick={() => commitEdit(rule)}>Apply</button>
                             <button className="btn secondary" onClick={() => setEditing(null)}>Cancel</button>
                           </div>
+                          {rule.kind === "allowlist" && <SellerPicks draft={draft} setDraft={setDraft} />}
                           {editErr && <p role="alert" style={{ color: "var(--orange)" }}>{editErr}</p>}
                         </div>
                       ) : ed ? (
@@ -243,5 +244,24 @@ export function AgentRules({ agentId }: { agentId: string }) {
         </div>
       </div>
     </>
+  );
+}
+
+/** Registered sellers (Settings → Sellers) as one-tap additions to an allowlist being edited. */
+function SellerPicks({ draft, setDraft }: { draft: string; setDraft: (v: string) => void }) {
+  const [sellers, setSellers] = useState<Seller[] | null>(null);
+  useEffect(() => { api<{ items: Seller[] }>("/v1/sellers").then((r) => setSellers(r.items)).catch(() => setSellers(null)); }, []);
+  if (!sellers?.length) return null;
+  const current = draft.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+  const missing = sellers.filter((s) => !current.includes(s.name));
+  const unknown = current.filter((n) => !/^0x[0-9a-f]{40}$/.test(n) && !sellers.some((s) => s.name === n));
+  return (
+    <div className="seller-picks">
+      {missing.length > 0 && <span className="muted small">Add a registered seller:</span>}
+      {missing.map((s) => (
+        <button type="button" key={s.name} className="pill" onClick={() => setDraft([...current, s.name].join(", "))}>+ {s.name}</button>
+      ))}
+      {unknown.length > 0 && <span className="small warn-text">Not registered, so payments to it can&apos;t go out: {unknown.join(", ")}. Add it in Settings → Sellers.</span>}
+    </div>
   );
 }

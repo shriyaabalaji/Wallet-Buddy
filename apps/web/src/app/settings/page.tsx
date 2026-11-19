@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { ARC_EXPLORER, ApiError, api, type NotifyEvent } from "@/lib/api";
+import { ARC_EXPLORER, ApiError, api, type NotifyEvent, type Seller } from "@/lib/api";
 import { useAgents } from "@/lib/agents";
 import { usePoll } from "@/lib/hooks";
 import { ErrorState, Icon, Money, shortAddr } from "@/components";
@@ -26,6 +26,7 @@ export default function SettingsPage() {
         <div className="settings-body">
           <Wallet />
           <AddMoney />
+          <Sellers />
           <TextMessages />
           <PasskeySetup />
         </div>
@@ -37,6 +38,7 @@ export default function SettingsPage() {
 const SECTIONS = [
   { id: "wallet", label: "Wallet", icon: "wallet" },
   { id: "add-money", label: "Add money", icon: "plus" },
+  { id: "sellers", label: "Sellers", icon: "users" },
   { id: "sms", label: "Text messages", icon: "bolt" },
   { id: "pk", label: "Passkey", icon: "lock" },
 ];
@@ -185,6 +187,66 @@ function TextMessages() {
         </div>
       </div>
       {error && <ErrorState error={error} />}
+    </section>
+  );
+}
+
+/**
+ * Settings → Sellers (GET/POST/DELETE /v1/sellers): the names your agents can pay and the wallet each must be paid at.
+ * A payment to a name only goes out if the seller's own payment request asks to be paid at this address.
+ */
+function Sellers() {
+  const list = usePoll(() => api<{ items: Seller[] }>("/v1/sellers"), 30000);
+  const [name, setName] = useState("");
+  const [address, setAddress] = useState("");
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+
+  async function add() {
+    setErr(null); setDone(null); setBusy("add");
+    try {
+      const s = await api<Seller>("/v1/sellers", { method: "POST", body: { name, address, url } });
+      setName(""); setAddress(""); setUrl("");
+      setDone(`Added ${s.name}`);
+      await list.refresh();
+    } catch (e) { setErr(e instanceof Error ? e.message : "Couldn't add the seller."); } finally { setBusy(null); }
+  }
+  async function remove(n: string) {
+    setErr(null); setDone(null); setBusy(n);
+    try { await api(`/v1/sellers/${encodeURIComponent(n)}`, { method: "DELETE" }); await list.refresh(); }
+    catch (e) { setErr(e instanceof Error ? e.message : "Couldn't remove the seller."); } finally { setBusy(null); }
+  }
+
+  const items = list.data?.items;
+  return (
+    <section className="panel" aria-labelledby="sellers">
+      <div className="panel-head"><h2 id="sellers">Sellers</h2></div>
+      {list.error && !items && <ErrorState error={list.error} onRetry={list.refresh} />}
+      {!items && !list.error && <p className="muted" role="status">Loading…</p>}
+      {items?.length === 0 && <Row label="No sellers yet"><span className="muted">Add one below so your agents can pay it by name.</span></Row>}
+      {items?.map((s) => (
+        <Row key={s.name} label={s.name} hint={s.url ? s.url.replace(/^https?:\/\//, "") : undefined}>
+          <div className="seller-ctl">
+            <a className="mono" href={`${ARC_EXPLORER}/address/${s.address}`} target="_blank" rel="noreferrer" title={s.address}>{shortAddr(s.address)}</a>
+            <button type="button" className="btn secondary sm" onClick={() => remove(s.name)} disabled={busy !== null} aria-label={`Remove ${s.name}`}>{busy === s.name ? "Removing…" : "Remove"}</button>
+          </div>
+        </Row>
+      ))}
+      <Row label="Add a seller" hint="The name your agents use, and the wallet it must be paid at">
+        <div className="seller-form">
+          <input type="text" aria-label="Seller name" placeholder="name, like sportsfeed" value={name} spellCheck={false} autoCapitalize="none" onChange={(e) => { setName(e.target.value); setErr(null); setDone(null); }} />
+          <input type="text" aria-label="Wallet address" className="mono" placeholder="0x…" value={address} spellCheck={false} onChange={(e) => { setAddress(e.target.value); setErr(null); setDone(null); }} />
+          <input type="text" inputMode="url" aria-label="Website (optional)" placeholder="https://… (optional)" value={url} spellCheck={false} onChange={(e) => { setUrl(e.target.value); setErr(null); setDone(null); }}
+            onKeyDown={(e) => { if (e.key === "Enter" && name.trim() && address.trim()) void add(); }} />
+          <div className="toolbar">
+            <button type="button" className="btn" onClick={add} disabled={!name.trim() || !address.trim() || busy !== null}>{busy === "add" ? "Adding…" : "Add seller"}</button>
+            {done && <span className="saved-note" role="status"><Icon name="check" size={16} />{done}</span>}
+          </div>
+          {err && <p className="field-err" role="alert">{err}</p>}
+        </div>
+      </Row>
     </section>
   );
 }

@@ -69,7 +69,7 @@ describe("proxy: owner routes", () => {
   });
 
   it("forwards the global holds and settings routes as owner routes, and only with a session", async () => {
-    const cases = [["GET", "/v1/holds"], ["GET", "/v1/settings"], ["POST", "/v1/settings"]] as const;
+    const cases = [["GET", "/v1/holds"], ["GET", "/v1/settings"], ["POST", "/v1/settings"], ["GET", "/v1/sellers"], ["POST", "/v1/sellers"], ["DELETE", "/v1/sellers/sportsfeed"]] as const;
     for (const [m, p] of cases) {
       expect(classify(m, segs(p)), `${m} ${p}`).toEqual({ path: p, access: "owner" });
       const f = fakeFirewall();
@@ -89,6 +89,8 @@ describe("proxy: owner routes", () => {
     expect(classify("GET", segs("/v1/holds/req_1"))).toBeNull();
     expect(classify("POST", segs("/v1/holds"))).toBeNull();
     expect(classify("DELETE", segs("/v1/settings"))).toBeNull();
+    expect(classify("DELETE", segs("/v1/sellers"))).toBeNull();
+    expect(classify("DELETE", segs("/v1/sellers/a/b"))).toBeNull();
     expect(classify("GET", segs("/v1/settings/phone"))).toBeNull();
   });
 

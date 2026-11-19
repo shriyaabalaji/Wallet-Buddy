@@ -110,6 +110,8 @@ export function openDb(path: string): DB {
   try { db.exec("ALTER TABLE requests ADD COLUMN simulated INTEGER NOT NULL DEFAULT 0"); } catch { /* already there */ }
   // When the owner resolved an uncertain outcome by hand (POST /v1/payments/:id/reconcile).
   try { db.exec("ALTER TABLE requests ADD COLUMN reconciled_ms INTEGER"); } catch { /* already there */ }
+  // Wall-clock time the firewall took to decide (evaluate + reserve), for the latency metric on /proof.
+  try { db.exec("ALTER TABLE requests ADD COLUMN decision_ms REAL"); } catch { /* already there */ }
   db.exec(`
     CREATE INDEX IF NOT EXISTS requests_agent_recipient ON requests(agent_id, lower(recipient));
     CREATE INDEX IF NOT EXISTS requests_agent_anomalous ON requests(agent_id, created_ms) WHERE anomalies_json <> '[]';

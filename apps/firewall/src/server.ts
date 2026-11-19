@@ -26,6 +26,7 @@ import { authConfig, authenticate, authSummary, type AuthConfig, type Principal 
 import { activityFilter, hourlySeries, listAgents, settlementOf, todayTotals } from "./overview";
 import { CATEGORIES as OPT_CATEGORIES } from "@agent-firewall/policy";
 import { DEMO_PROVIDERS, fetchQuote, listRecommendations, optimizerResolve, recommend, saveRecommendation } from "./optimizer";
+import { proofView } from "./proof";
 
 class HttpError extends Error {
   constructor(public status: number, message: string) {
@@ -334,8 +335,10 @@ route("POST", "/v1/payments/evaluate", "agent", async ({ db, body, who }) => {
     throw new HttpError(400, (e as Error).message);
   }
   assertActsFor(who, req.agentId);
+  const t0 = performance.now();
   const before = spendState(db, req.agentId, req.taskId, new Date());
   const res = evaluateAndReserve(db, req, { holdMinutes: config.holdMinutes, devMode: config.devMode });
+  if (!res.duplicate) db.prepare("UPDATE requests SET decision_ms=? WHERE request_id=? AND decision_ms IS NULL").run(Math.round((performance.now() - t0) * 100) / 100, req.requestId);
   // A replayed requestId returns the stored decision; don't hand another agent's decision back.
   if (res.duplicate) assertOwnsRequest(db, { kind: "agent", agentId: req.agentId }, req.requestId);
   if (!res.duplicate) {
@@ -375,6 +378,9 @@ route("POST", "/v1/optimizer/recommend", "ownerOrAgent", async ({ db, body, who 
   return { id, ...rec, sellersUrl: base };
 });
 route("GET", "/v1/optimizer/recommendations", "owner", ({ db, query }) => listRecommendations(db, query.get("agentId") ?? undefined));
+// Onchain proof: public by design. Everything here is already public on Arc, plus aggregate ledger counts (no
+// tokens, phones, purposes of other agents' payments beyond what the decision log already commits to).
+route("GET", "/v1/proof", "public", ({ db, query }) => proofView(db, Math.min(Number(query.get("limit") ?? 300) || 300, 1000)));
 route("GET", "/v1/signer", "public", () => ({ address: payerAddress(), mode: paymentMode, network: PAY_NETWORK, arcNetwork: network }));
 /**
  * Request ids a /pay call is working on. payWithCircle awaits the seller probe before it claims signed_ms, so the

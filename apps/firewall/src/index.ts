@@ -7,6 +7,7 @@ import { arcStatus } from "./arc";
 import { smsConfigured } from "./sms";
 import { sweepBuyerWallet, topUpGateway } from "./funding";
 import { authConfig, authSummary } from "./auth";
+import { indexChain } from "./proof";
 
 const db = openDb(config.dbPath);
 createApp(db).listen(config.port, () => {
@@ -50,3 +51,15 @@ async function fundingTick() {
 }
 void fundingTick();
 setInterval(fundingTick, 60_000);
+
+// Onchain proof indexer: backfill from the deploy block on start, then follow the chain head.
+async function proofTick() {
+  try {
+    const r = await indexChain(db);
+    if (r.added) console.log(`[proof] indexed ${r.added} new Arc event(s) through block ${r.scannedTo}`);
+  } catch (e) {
+    console.error("[proof]", e instanceof Error ? e.message.split("\n")[0] : e);
+  }
+}
+void proofTick();
+setInterval(proofTick, 15_000);

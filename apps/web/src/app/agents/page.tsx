@@ -86,11 +86,10 @@ function AgentView({ agent, tab, setTab, onChanged }: { agent: AgentListItem; ta
       <section className="agent-head" aria-label="Agent">
         <div className="name-id">
           <h2 className="agent-name">{displayName(agent.name)}</h2>
-          <span className="small muted">
+          <span className="small agent-meta">
             <span className="status"><span className={`dot ${paused ? "paused" : ""}`} aria-hidden="true" />{paused ? "Paused" : "Active"}</span>
-            {" · "}<span className="mono">{agent.id}</span>
-            {" · "}{agent.hasPolicy ? "Rules locked on Arc" : "No rules: can't spend"}
-            {" · "}{agent.credentialConfigured ? "Key configured" : "No key yet"}
+            {!agent.hasPolicy && <span className="pill warn">No rules: can&apos;t spend</span>}
+            {!agent.credentialConfigured && <span className="pill warn">No key yet</span>}
           </span>
         </div>
         <div className="toolbar">

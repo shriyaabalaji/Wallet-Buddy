@@ -5,7 +5,7 @@ import { formatUsd } from "@agent-firewall/policy";
 import { api, type AgentListItem, type HeldPayment } from "@/lib/api";
 import { useAgents } from "@/lib/agents";
 import { useNow, usePoll } from "@/lib/hooks";
-import { BalanceCard, ErrorState, Icon, Money, PauseButton, displayName, fmtLeft, shortAddr } from "@/components";
+import { BalanceCard, ErrorState, Icon, Money, PauseButton, PopCard, displayName, fmtLeft, shortAddr } from "@/components";
 
 type Hold = HeldPayment & { agentId: string; agentName?: string };
 
@@ -49,24 +49,49 @@ export default function Home() {
 
       <section className="glance4" aria-label="Wallet">
         <BalanceCard health={health} />
-        <div className="card">
-          <div className="card-top"><h2>Spent today</h2><Link className="round-link" href="/activity?status=paid" aria-label="See payments"><Icon name="arrow" size={16} /></Link></div>
-          <Money micro={spent} size="lg" />
-          <p className="small muted foot">{agents.length === 0 ? "No agents yet" : `${spenders} of ${agents.length} agent${agents.length === 1 ? "" : "s"} paid today`}</p>
-        </div>
-        <div className="card">
-          <div className="card-top"><h2>Stopped today</h2><Link className="round-link" href="/activity?status=blocked" aria-label="See blocked payments"><Icon name="arrow" size={16} /></Link></div>
-          <Money micro={stopped} size="lg" />
-          <span className="tags foot">
-            <span className={`pill ${blocked ? "warn" : "quiet"}`}>{blocked} blocked</span>
-            {flagged > 0 && <Link className="pill warn" href="/activity?flagged=1">{flagged} unusual</Link>}
-          </span>
-        </div>
-        <div className={`card ${waiting ? "attention" : ""}`}>
-          <div className="card-top"><h2>Waiting for you</h2></div>
-          <span className="money lg">{waiting}</span>
-          <p className="small muted foot">{waiting ? `payment${waiting === 1 ? "" : "s"} held for your approval` : "Nothing to approve"}</p>
-        </div>
+        <PopCard
+          title="Spent today"
+          front={<>
+            <div className="card-top"><h2>Spent today</h2><Link className="round-link" href="/activity?status=paid" aria-label="See payments"><Icon name="arrow" size={16} /></Link></div>
+            <Money micro={spent} size="lg" />
+          </>}
+          details={<>
+            <Money micro={spent} size="xl" />
+            <p className="muted">{agents.length === 0 ? "No agents yet." : `${spenders} of ${agents.length} agent${agents.length === 1 ? "" : "s"} paid today.`}</p>
+            <PerAgent rows={agents.filter((a) => a.today.paidMicro > 0).map((a) => [displayName(a.name), formatUsd(a.today.paidMicro)])} />
+            <Link className="btn secondary" href="/activity?status=paid">See payments</Link>
+          </>}
+        />
+        <PopCard
+          title="Stopped today"
+          front={<>
+            <div className="card-top"><h2>Stopped today</h2><Link className="round-link" href="/activity?status=blocked" aria-label="See blocked payments"><Icon name="arrow" size={16} /></Link></div>
+            <Money micro={stopped} size="lg" />
+            <span className="tags foot">
+              <span className={`pill ${blocked ? "warn" : "quiet"}`}>{blocked} blocked</span>
+              {flagged > 0 && <Link className="pill warn" href="/activity?flagged=1">{flagged} unusual</Link>}
+            </span>
+          </>}
+          details={<>
+            <Money micro={stopped} size="xl" />
+            <p className="muted">{blocked} payment{blocked === 1 ? "" : "s"} blocked by your rules{flagged ? `, ${flagged} flagged as unusual` : ""}.</p>
+            <PerAgent rows={agents.filter((a) => a.today.stoppedMicro > 0).map((a) => [displayName(a.name), `${formatUsd(a.today.stoppedMicro)} (${a.today.counts.blocked} blocked)`])} />
+            <Link className="btn secondary" href="/activity?status=blocked">See blocked payments</Link>
+          </>}
+        />
+        <PopCard
+          title="Waiting for you"
+          className={waiting ? "attention" : ""}
+          front={<>
+            <div className="card-top"><h2>Waiting for you</h2></div>
+            <span className="money lg">{waiting}</span>
+          </>}
+          details={<>
+            <span className="money xl">{waiting}</span>
+            <p className="muted">{waiting ? `Payment${waiting === 1 ? "" : "s"} held for your approval.` : "Nothing to approve."}</p>
+            <PerAgent rows={(waitingList ?? []).map((h) => [`${nameOf(h)} to ${shortAddr(h.recipient)}`, formatUsd(h.amountMicro)])} />
+          </>}
+        />
       </section>
 
       {waitingList && waitingList.length > 0 && (
@@ -156,5 +181,15 @@ function AgentTile({ a, onChanged }: { a: AgentListItem; onChanged: () => Promis
         <PauseButton agent={a} onChanged={onChanged} compact />
       </div>
     </li>
+  );
+}
+
+/** Name / amount rows inside an Overview pop-up. */
+function PerAgent({ rows }: { rows: [string, string][] }) {
+  if (rows.length === 0) return null;
+  return (
+    <ul className="pop-rows">
+      {rows.map(([k, v], i) => <li key={i}><span>{k}</span><span className="mono">{v}</span></li>)}
+    </ul>
   );
 }

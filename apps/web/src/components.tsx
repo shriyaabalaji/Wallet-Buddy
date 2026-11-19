@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { formatUsd } from "@agent-firewall/policy";
 import type { AnomalySignal } from "@agent-firewall/policy";
 import { ARC_EXPLORER, ApiError, api, txUrl, type ActivityItem, type AgentListItem, type Health, type Outcome, type Settlement, type SettlementState } from "@/lib/api";
@@ -170,6 +170,7 @@ export function shortAddr(s: string) {
 }
 
 const PATHS: Record<string, ReactNode> = {
+  x: <path d="M6 6l12 12M18 6 6 18" />,
   home: <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z" />,
   shield: <path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z" />,
   list: <path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" />,
@@ -342,6 +343,53 @@ export function PauseButton({ agent, onChanged, compact = false }: { agent: Pick
         <Icon name={paused ? "play" : "pause"} size={compact ? 14 : 16} />{label}
       </button>
       {err && <span role="alert" className="field-err">{err}</span>}
+    </>
+  );
+}
+
+/**
+ * A metric card that opens its details as a pop-up: on click it flips and flies from where it sits to the middle of
+ * the screen. Clicks on links or buttons inside the card do their own thing. Close with the X, Esc, or the backdrop.
+ */
+export function PopCard({ title, className = "", front, details }: { title: string; className?: string; front: ReactNode; details: ReactNode }) {
+  const cardRef = useRef<HTMLDivElement>(null);
+  const dlgRef = useRef<HTMLDialogElement>(null);
+  const [open, setOpen] = useState(false);
+
+  function show() {
+    const card = cardRef.current, dlg = dlgRef.current;
+    if (!card || !dlg) return;
+    const r = card.getBoundingClientRect();
+    // Start the pop-up over the card (offset from screen center, scaled to the card's width), then animate to center.
+    dlg.style.setProperty("--dx", `${r.left + r.width / 2 - window.innerWidth / 2}px`);
+    dlg.style.setProperty("--dy", `${r.top + r.height / 2 - window.innerHeight / 2}px`);
+    dlg.style.setProperty("--s", String(Math.min(1, r.width / Math.min(460, window.innerWidth - 32))));
+    dlg.showModal();
+    setOpen(true);
+  }
+  function close() { dlgRef.current?.close(); }
+
+  return (
+    <>
+      <div
+        ref={cardRef}
+        className={`card pop-card ${open ? "is-open" : ""} ${className}`}
+        role="button" tabIndex={0} aria-haspopup="dialog" aria-label={`${title}: show details`}
+        onClick={(e) => { if (!(e.target as HTMLElement).closest("a,button")) show(); }}
+        onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) { e.preventDefault(); show(); } }}
+      >
+        {front}
+      </div>
+      <dialog
+        ref={dlgRef} className="pop-dialog" aria-label={title}
+        onClose={() => { setOpen(false); cardRef.current?.focus(); }}
+        onClick={(e) => { if (e.target === e.currentTarget) close(); }}
+      >
+        <div className="pop-body">
+          <div className="pop-head"><h2>{title}</h2><button className="round-link" onClick={close} aria-label="Close"><Icon name="x" size={16} /></button></div>
+          {details}
+        </div>
+      </dialog>
     </>
   );
 }

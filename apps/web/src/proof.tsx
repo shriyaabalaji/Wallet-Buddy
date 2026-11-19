@@ -65,9 +65,6 @@ export function ProofMetrics({ m }: { m: Proof["metrics"] }) {
         <Stat label="Decision latency" value={m.decisionLatencyMs.avg == null ? "—" : `${m.decisionLatencyMs.avg} ms`} sub={m.decisionLatencyMs.samples ? `avg of ${m.decisionLatencyMs.samples}, p95 ${m.decisionLatencyMs.p95} ms` : "no samples yet"} />
         <Stat label="Worst-case loss" value={`${usd(m.worstCaseLoss.perDayUsdc)}/day`} sub="if the agent or payer key is compromised" />
       </section>
-      {m.blockedByRule.length > 0 && (
-        <p className="small muted">Blocked by rule: {m.blockedByRule.map((b) => `${b.rule} ${b.count}`).join(", ")}. Flagged as unusual: {m.flaggedRequests}. Metrics come from the firewall&apos;s ledger; the transactions below come from the chain.</p>
-      )}
     </>
   );
 }
@@ -133,12 +130,27 @@ function detail(t: Proof["transactions"][number]) {
   return amt;
 }
 
+/** A metric that flips over on hover (or tap / Enter) to show its breakdown. Without a breakdown it's a plain card. */
 function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
+  const [flipped, setFlipped] = useState(false);
+  if (!sub) return (
     <div className="card">
       <span className="label">{label}</span>
       <span className="big">{value}</span>
-      {sub && <span className="small muted">{sub}</span>}
     </div>
+  );
+  return (
+    <button type="button" className={`flip ${flipped ? "flipped" : ""}`} aria-pressed={flipped} aria-label={`${label}: ${value}. ${sub}`} onClick={() => setFlipped((f) => !f)}>
+      <span className="flip-inner" aria-hidden="true">
+        <span className="card flip-face">
+          <span className="label">{label}</span>
+          <span className="big">{value}</span>
+        </span>
+        <span className="card flip-face flip-back">
+          <span className="label">{label}</span>
+          <span className="flip-detail">{sub}</span>
+        </span>
+      </span>
+    </button>
   );
 }

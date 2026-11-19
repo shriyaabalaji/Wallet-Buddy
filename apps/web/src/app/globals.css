@@ -405,3 +405,41 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px
 .proof-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .tab-panel .proof-stats { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .tab-panel .proof-stats .card { padding: 16px 18px; gap: 4px; }
+.agent-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--muted); }
+
+/* Onchain metric cards flip on hover (or tap / Enter) to show their breakdown. */
+.flip { all: unset; display: block; perspective: 900px; cursor: pointer; border-radius: var(--r-card); min-height: 108px; }
+.flip:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+.flip-inner { position: relative; display: grid; height: 100%; transition: transform .5s cubic-bezier(.2, .7, .2, 1); transform-style: preserve-3d; }
+.flip-face { grid-area: 1 / 1; backface-visibility: hidden; -webkit-backface-visibility: hidden; height: 100%; box-sizing: border-box; }
+.flip-back { transform: rotateY(180deg); background: var(--blue-tint); border-color: var(--sky); }
+.flip-detail { font-size: .95rem; line-height: 1.4; color: var(--text); }
+.flip.flipped .flip-inner { transform: rotateY(180deg); }
+@media (hover: hover) { .flip:hover .flip-inner { transform: rotateY(180deg); } }
+.tab-panel .proof-stats .flip .card { padding: 16px 18px; gap: 4px; }
+
+/* Overview metric cards open as a pop-up that flips and flies to the center. */
+.pop-card { cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s; }
+.pop-card:hover { border-color: var(--sky); box-shadow: 0 8px 24px -16px rgba(0, 115, 195, .4); transform: translateY(-1px); }
+.pop-card:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+.pop-card.is-open { visibility: hidden; }
+.pop-dialog { border: 0; padding: 0; background: transparent; width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow: visible; perspective: 1200px; }
+.pop-dialog::backdrop { background: rgba(10, 30, 60, .28); backdrop-filter: blur(3px); animation: pop-fade .3s ease both; }
+.pop-dialog[open] .pop-body { animation: pop-in .55s cubic-bezier(.2, .8, .2, 1) both; }
+.pop-body { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-card); padding: 24px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 30px 60px -24px rgba(0, 60, 120, .35); max-height: calc(100vh - 64px); overflow: auto; box-sizing: border-box; }
+.pop-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.pop-head h2 { margin: 0; font-size: 1.1rem; }
+.pop-body .muted { margin: 0; }
+.pop-body .btn { align-self: flex-start; }
+.pop-rows { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.pop-rows li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: .92rem; }
+@keyframes pop-in {
+  0% { transform: translate(var(--dx, 0), var(--dy, 0)) scale(var(--s, .5)) rotateY(0); opacity: .6; }
+  45% { transform: translate(calc(var(--dx, 0) * .4), calc(var(--dy, 0) * .4)) scale(calc((var(--s, .5) + 1) / 2)) rotateY(90deg); }
+  100% { transform: none; opacity: 1; }
+}
+@keyframes pop-fade { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .flip-inner { transition: none; }
+  .pop-dialog[open] .pop-body, .pop-dialog::backdrop { animation: pop-fade .15s ease both; }
+}

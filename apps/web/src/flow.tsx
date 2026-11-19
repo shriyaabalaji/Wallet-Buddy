@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { formatUsd } from "@agent-firewall/policy";
 import { api, type ActivityItem, type AgentListItem } from "@/lib/api";
 import { usePoll } from "@/lib/hooks";
-import { displayName, shortAddr } from "@/components";
+import { BuddyGlyph, displayName, shortAddr } from "@/components";
 
 /**
  * Live payment flow for the Overview: agents on the left (bubble size = what they spent today), Wallet Buddy in the
@@ -15,7 +15,7 @@ import { displayName, shortAddr } from "@/components";
 
 const W = 1000, H = 280;
 const AX = 210, FX = 500, SX = 790; // agent, firewall, seller columns (viewBox units)
-const FW_W = 150, FW_H = 76;
+const FW_W = 160, FW_H = 92;
 const MAX_AGENTS = 6, MAX_SELLERS = 5;
 const REPLAY = 14;
 
@@ -53,6 +53,7 @@ export function PaymentFlow({ agents }: { agents: AgentListItem[] }) {
   const outPaths = useRef<(SVGPathElement | null)[]>([]);
   const dotEls = useRef(new Map<string, SVGGElement>());
   const fwRef = useRef<SVGRectElement>(null);
+  const buddyRef = useRef<SVGGElement>(null);
   const [dots, setDots] = useState<Dot[]>([]);
   const [live, setLive] = useState(false);
   const [hover, setHover] = useState<number | null>(null);
@@ -135,10 +136,10 @@ export function PaymentFlow({ agents }: { agents: AgentListItem[] }) {
       raf = requestAnimationFrame(frame);
     };
     const flash = (cls: string) => {
-      const fw = fwRef.current;
+      const fw = fwRef.current, buddy = buddyRef.current;
       if (!fw || fw.classList.contains(cls)) return;
-      fw.classList.add(cls);
-      setTimeout(() => fw.classList.remove(cls), 450);
+      fw.classList.add(cls); buddy?.classList.add(cls);
+      setTimeout(() => { fw.classList.remove(cls); buddy?.classList.remove(cls); }, 450);
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
@@ -170,9 +171,9 @@ export function PaymentFlow({ agents }: { agents: AgentListItem[] }) {
 
             {/* Wallet Buddy */}
             <g className="fw">
-              <rect ref={fwRef} x={FX - FW_W / 2} y={H / 2 - FW_H / 2} width={FW_W} height={FW_H} rx={20} />
-              <path d={`M${FX},${H / 2 - 22} l-11,4 v8 c0,7 5,11 11,13 c6,-2 11,-6 11,-13 v-8 z`} className="fw-shield" />
-              <text x={FX} y={H / 2 + 24} textAnchor="middle" className="fw-label">Wallet Buddy</text>
+              <rect ref={fwRef} className="fw-box" x={FX - FW_W / 2} y={H / 2 - FW_H / 2} width={FW_W} height={FW_H} rx={20} />
+              <g ref={buddyRef} transform={`translate(${FX - 21},${H / 2 - 40}) scale(1.3)`} className="fw-buddy"><BuddyGlyph clasp="#005b9e" /></g>
+              <text x={FX} y={H / 2 + 30} textAnchor="middle" className="fw-label">Wallet Buddy</text>
             </g>
 
             {/* agents */}

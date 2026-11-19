@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useRef, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { formatUsd } from "@agent-firewall/policy";
 import type { AnomalySignal } from "@agent-firewall/policy";
 import { ARC_EXPLORER, ApiError, api, txUrl, type ActivityItem, type AgentListItem, type Health, type Outcome, type Settlement, type SettlementState } from "@/lib/api";
@@ -64,7 +64,41 @@ function ShellFrame({ path, children }: { path: string; children: ReactNode }) {
 
 /** Product name with its mark. Used in the sidebar and on the sign-in page. */
 export function Brand() {
-  return <Link href="/" className="brand"><span className="brand-mark" aria-hidden="true"><Icon name="wallet" size={18} /></span>Wallet Buddy</Link>;
+  return <Link href="/" className="brand"><BuddyMark className="brand-mark" />Wallet Buddy</Link>;
+}
+
+/**
+ * The buddy on a 32-unit grid: a wallet (with a card peeking out the top) whose clasp has two eyes. `clasp` is the
+ * clasp's color, normally the tile's darker blue so the eyes read as cut out of it.
+ */
+export function BuddyGlyph({ fill = "#fff", clasp = "#005b9e" }: { fill?: string; clasp?: string }) {
+  return (
+    <>
+      <rect x="9" y="6" width="13" height="5" rx="2" fill={fill} opacity=".55" />
+      <rect x="5" y="9" width="21" height="16" rx="4.5" fill={fill} />
+      <rect className="clasp" x="16.5" y="13" width="11.5" height="8" rx="4" fill={clasp} />
+      <circle className="eye" cx="20.3" cy="17" r="1.35" fill={fill} />
+      <circle className="eye" cx="24.2" cy="17" r="1.35" fill={fill} />
+    </>
+  );
+}
+
+/** Wallet Buddy's mark: the buddy on a Circle-blue tile. */
+export function BuddyMark({ className, size = 34 }: { className?: string; size?: number }) {
+  const id = useId();
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
+      <defs>
+        <linearGradient id={id} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#5fbfff" />
+          <stop offset=".45" stopColor="#1aa3ff" />
+          <stop offset="1" stopColor="#0073c3" />
+        </linearGradient>
+      </defs>
+      <rect width="32" height="32" rx="10" fill={`url(#${id})`} />
+      <BuddyGlyph />
+    </svg>
+  );
 }
 
 /** Agent names are stored as typed (or derived from the id, e.g. "research agent"); show them capitalized. */

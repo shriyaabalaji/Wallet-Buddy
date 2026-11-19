@@ -21,7 +21,7 @@ a { color: var(--blue); }
 .shell { display: grid; grid-template-columns: 236px minmax(0, 1fr); min-height: 100vh; gap: 0; }
 .sidebar { margin: 16px 0 16px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-card); padding: 20px 14px; display: flex; flex-direction: column; gap: 22px; position: sticky; top: 16px; height: calc(100vh - 32px); }
 .brand { font-family: var(--font-outfit), sans-serif; font-weight: 600; font-size: 1.2rem; letter-spacing: -.01em; color: var(--text); text-decoration: none; padding: 0 8px; display: inline-flex; align-items: center; gap: 10px; }
-.brand-mark { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, var(--light) 0%, var(--usdc) 45%, var(--blue) 100%); box-shadow: 0 4px 12px -4px rgba(26, 163, 255, .55); color: #fff; display: inline-flex; align-items: center; justify-content: center; }
+.brand-mark { width: 34px; height: 34px; flex: none; border-radius: 10px; box-shadow: 0 4px 12px -4px rgba(26, 163, 255, .55); }
 .nav { display: flex; flex-direction: column; gap: 4px; }
 .nav a { min-height: 44px; display: flex; align-items: center; gap: 12px; padding: 0 14px; border-radius: 999px; color: var(--muted); text-decoration: none; font-weight: 500; transition: background .15s, color .15s; }
 .nav a:hover { background: var(--soft); color: var(--text); }
@@ -450,9 +450,9 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px
 .flow-stage svg { display: block; width: 100%; height: auto; max-height: 300px; overflow: visible; font-family: var(--font-inter), system-ui, sans-serif; }
 .flow .lane { fill: none; stroke: var(--line); stroke-width: 2; stroke-dasharray: 2 6; stroke-linecap: round; transition: stroke .2s; }
 .flow .lane.on { stroke: var(--sky); stroke-dasharray: none; }
-.flow .fw rect { fill: var(--blue); stroke: var(--blue); stroke-width: 3; transition: fill .2s, stroke .2s; }
-.flow .fw rect.hit-block { stroke: var(--orange); fill: #c26d0a; }
-.flow .fw rect.hit-hold { stroke: var(--gold); }
+.flow .fw .fw-box { fill: var(--blue); stroke: var(--blue); stroke-width: 3; transition: fill .2s, stroke .2s; }
+.flow .fw .fw-box.hit-block { stroke: var(--orange); fill: #c26d0a; }
+.flow .fw .fw-box.hit-hold { stroke: var(--gold); }
 .flow .fw-shield { fill: none; stroke: #fff; stroke-width: 2.4; stroke-linejoin: round; }
 .flow .fw-label { fill: #fff; font-family: var(--font-outfit), sans-serif; font-weight: 600; font-size: 17px; }
 .flow .agent { cursor: pointer; outline: none; }
@@ -511,3 +511,9 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px
 
 .wallet-balance { display: flex; flex-direction: column; gap: 2px; }
 .change-wallet .steps { border-top: 0; padding-top: 0; }
+/* The buddy in the flow blinks when it blocks a payment and squints (half-closed eyes) while one waits for you. */
+.flow .fw-buddy .eye { transform-box: fill-box; transform-origin: center; transition: transform .12s; }
+.flow .fw-buddy.hit-block .eye { animation: buddy-blink .45s ease-in-out; }
+.flow .fw-buddy.hit-hold .eye { transform: scaleY(.45); }
+.flow .fw-buddy.hit-block .clasp { fill: #8a4c06; }
+@keyframes buddy-blink { 0%, 100% { transform: none; } 35%, 60% { transform: scaleY(.1); } }

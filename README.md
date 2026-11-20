@@ -7,7 +7,7 @@
 | **Demo video** | _link coming soon_ |
 | **Track** | Agentic Payments & AI |
 | **Chain award** | Best use of Arc |
-| **Team** | Shriyaa Balaji, _teammate_ |
+| **Team** | Shriyaa Balaji, Ishan Guthikonda, Anubhuti Mittal |
 | **Built with** | Circle Agent Wallets (CLI), Circle Gateway nanopayments, x402, USDC, Arc testnet (PolicyRegistry + ApprovalVault contracts), Claude (agent + plain-English rule compiler), MCP, WebAuthn passkeys, Textbelt SMS, Next.js, Node, SQLite, Foundry |
 | **Onchain proof** | `/proof` on the dashboard lists every Arc transaction live; addresses and sample transactions are [below](#deployed-contracts-and-sample-transactions-arc-testnet-chain-5042002) |
 

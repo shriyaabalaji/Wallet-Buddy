@@ -66,7 +66,7 @@ The dashboard's `/proof` page lists every onchain transaction live.
 ## Quickstart
 
 ```bash
-git clone https://github.com/shriyaabalaji/ubc2026 && cd ubc2026 && npm install
+git clone https://github.com/shriyaabalaji/Wallet-Buddy && cd Wallet-Buddy && npm install
 npm test                 # 325 tests, no network or funds needed
 npm run test:contracts   # 17 Foundry tests
 npm run demo:local       # offline demo: throwaway keys, mock settlement

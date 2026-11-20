@@ -2,7 +2,14 @@
 
 **A spending firewall for AI agents that pay with USDC.** Owners set the rules in plain English: budgets, approved sellers, ask-me-first limits. Wallet Buddy enforces them before every x402 nanopayment from a Circle Agent Wallet. Risky payments are escrowed on Arc until the owner says yes, and every decision is logged on Arc.
 
-🎥 **2-minute demo:** _link coming soon_ · 🔎 **Onchain proof:** `http://localhost:3000/proof` (live Arc transactions) · Built for UBC 2026, Agentic Payments & AI + Best use of Arc.
+| | |
+|---|---|
+| **Demo video** | _link coming soon_ |
+| **Track** | Agentic Payments & AI |
+| **Chain award** | Best use of Arc |
+| **Team** | Shriyaa Balaji, _teammate_ |
+| **Built with** | Circle Agent Wallets (CLI), Circle Gateway nanopayments, x402, USDC, Arc testnet (PolicyRegistry + ApprovalVault contracts), Claude (agent + plain-English rule compiler), MCP, WebAuthn passkeys, Textbelt SMS, Next.js, Node, SQLite, Foundry |
+| **Onchain proof** | `/proof` on the dashboard lists every Arc transaction live; addresses and sample transactions are [below](#deployed-contracts-and-sample-transactions-arc-testnet-chain-5042002) |
 
 ## The problem
 
@@ -44,7 +51,7 @@ The agent never holds a payment credential. It asks; the firewall decides and pa
 | | Circle Agent Wallet policies (native) | Wallet Buddy (this project) |
 |---|---|---|
 | Daily spending cap | ✅ mainnet only (`circle wallet limit set --daily`) | ✅ every network; plus per-day/week/month |
-| Recipient allowlist | ✅ mainnet only | ✅ by service name or address, block or hold |
+| Recipient allowlist | ✅ mainnet only | ✅ by seller name or address, block or hold; sellers are registered in Settings → Sellers with the wallet each must be paid at |
 | Per-task budgets | — | ✅ e.g. "$1 per research task" |
 | Per-transaction limit, categories, time windows | — | ✅ |
 | Rate limit → auto-pause | — | ✅ |
@@ -88,7 +95,7 @@ const r = await fw.requestPayment({ url: "http://localhost:4200/sportsfeed/injur
 
 ```bash
 git clone https://github.com/shriyaabalaji/ubc2026 && cd ubc2026 && npm install
-npm test                               # 264 tests, no network or funds needed
+npm test                               # 325 tests, no network or funds needed
 npm run test:contracts                 # Foundry (17)
 npm run demo:local                     # offline: throwaway keys, mock settlement, no funds
 ```
@@ -128,6 +135,7 @@ Setting up keys from scratch:
 - `circle wallet list --type agent --chain ARC-TESTNET`
 - `circle gateway balance --address <W> --chain ARC-TESTNET`
 - the address on the Arc explorer
+- the Overview's Balance card
 
 **Mainnet (real USDC), from the dashboard.** Verified on 2026-11-19 with a $0.02 payment. Everything except Circle's email codes happens in the dashboard:
 
@@ -145,7 +153,6 @@ Setting up keys from scratch:
 6. Recommended: Circle's own cap, which holds even if the firewall host is compromised (email code): `circle wallet limit set --address <W> --chain ARC --policy-type stablecoin --daily 5`.
 
 If the dashboard keeps reloading after you switch it between networks, stop it and delete `apps/web/.next`.
-- the Overview's Balance card
 
 ## Deployed contracts and sample transactions (Arc testnet, chain 5042002)
 
@@ -174,9 +181,9 @@ Testnet ledger (`GET /v1/proof` → `metrics`, 2026-11-19; live numbers are at t
 | Metric | Value |
 |---|---|
 | Payments settled | 37 ($6.41 total) |
-| Decisions | 128: 45 allowed · 77 blocked · 6 held |
-| Blocked by rule | task budget 66 · approved recipients/sellers 8 · paused 3 |
-| Holds | 3 denied → refunded · 2 expired → refunded · 1 pending |
+| Decisions | 128: 45 allowed, 77 blocked, 6 held |
+| Blocked by rule | task budget 66, approved recipients/sellers 8, paused 3 |
+| Holds | 3 denied → refunded, 2 expired → refunded, 1 pending |
 | Firewall decision latency | **2.4 ms** average server-side, p95 4.1 ms (24 samples); 4–11 ms as seen by the agent |
 | Worst-case loss, testnet | **$5/day** if the agent is hijacked or the payer credential leaks (Gateway top-up cap). The owner's rules bound it lower |
 | `npm run demo` | 8/8 checks, twice in a row, without manual steps in between |
@@ -186,12 +193,12 @@ Tests (`npm test`, `npm run test:contracts`):
 | Suite | Tests | Covers |
 |---|---|---|
 | `packages/policy` | 111 | every rule kind at its boundary, precedence, time windows/time zones |
-| `apps/firewall` | 119 | auth, holds, approvals, reservations, anomalies, optimizer, prompt injection, signup keys, security regressions, **multi-process races** and a **property test** (25 random seeds × 2 modes; no budget is ever exceeded) |
+| `apps/firewall` | 152 | auth, holds, approvals, reservations, anomalies, optimizer, prompt injection, signup keys, seller registry, security regressions, **multi-process races** and a **property test** (25 random seeds × 2 modes; no budget is ever exceeded) |
 | `packages/client` | 13 | allow/block/hold/error paths against a fake firewall + 402 seller |
 | `apps/mcp` | 3 | tool listing and calls |
-| `apps/web` | 18 | dashboard proxy allowlist, sessions, phone normalization |
+| `apps/web` | 46 | dashboard proxy allowlist, sessions, phone normalization |
 | `contracts` (Foundry) | 17 | vault hold/approve/deny/expiry, reentrancy, fuzz |
-| **Total** | **281** | |
+| **Total** | **342** | |
 
 ## Safety limits and threat model
 
@@ -219,7 +226,7 @@ Tests (`npm test`, `npm run test:contracts`):
 - **Sellers:** all ours, disclosed. Arc has no comparable third-party x402 sellers. The testnet sellers' data is real (ESPN's public NBA feeds); the mainnet demo seller returns placeholder text.
 - **The injection demo's hijack is scripted:** we make the agent obey, to show that the firewall holds even when the agent doesn't. In our runs, the real Claude agent didn't act on injected text.
 - **"Settled" means Circle's CLI paid and the seller delivered.** Gateway settles with sellers in batches and the CLI returns no transaction reference, so we don't claim a per-payment onchain hash. Circle's transfer API reports these `completed`.
-- **Texts:** sent with Textbelt (real US SMS, signed replies) or Twilio; without either they're logged, not sent. Set your number under Settings → Text messages. **Approving by text** (reply `YES <6-digit code>`) is weaker than a passkey (a SIM swap could approve), so it's limited to the owner's number, one code per payment, 5 tries, and a per-payment cap (default $5); bigger payments need the passkey.
+- **Texts:** sent with Textbelt (real US SMS, signed replies) or Twilio; without either they're logged, not sent. Set your number under Settings → Text messages. Replies reach the firewall through `FIREWALL_PUBLIC_URL`, so a laptop demo needs a public tunnel to port 4000 (e.g. `cloudflared tunnel --url http://localhost:4000`), and free tunnels expire. **Approving by text** (reply `YES <6-digit code>`) is weaker than a passkey (a SIM swap could approve), so it's limited to the owner's number, one code per payment, 5 tries, and a per-payment cap (default $5); bigger payments need the passkey.
 - **Passkey approval** was verified live; after the database reset on 2026-11-17 the owner must enroll again.
 - **Optimizer requests aren't rate-limited.** The optimizer API exists, but the dashboard no longer shows it.
 - **Dependencies:** `npm audit --omit=dev` reports 4 high-severity advisories in an old `zod` nested inside Circle's `@x402/*` packages. We haven't forced an upgrade of Circle's dependencies.
@@ -231,7 +238,7 @@ Tests (`npm test`, `npm run test:contracts`):
 | `packages/policy` | Pure rule evaluation (10 kinds), canonical policy hash, plain-English descriptions |
 | `packages/client` | `requestPayment()` for any TypeScript agent |
 | `apps/firewall` | HTTP API (`docs/API.md`), ledger, payer, holds, SMS, passkeys, anomalies, injection scan, optimizer, Arc adapter, proof indexer |
-| `apps/web` | Dashboard: Overview (wallet balance + agent carousel), Agents (per-agent overview + plain-English rules, add agent), Activity (payments + Onchain tab), Settings (phone; wallet: connect a Circle Agent Wallet with an emailed code, no terminal; passkey; Add money: deposit USDC into the agents' Gateway balance from MetaMask); public `/proof`; `/a/[token]` approve page |
+| `apps/web` | Dashboard: Overview (live payment flow: agents → Wallet Buddy → sellers, spend cards, agent carousel), Agents (per-agent overview + plain-English rules, add agent), Activity (payments + Onchain tab), Settings (wallet: connect a Circle Agent Wallet with an emailed code, no terminal; passkey; Add money: deposit USDC into the agents' Gateway balance from MetaMask; Sellers: the names agents can pay and each one's wallet; Text messages); public `/proof`; `/a/[token]` approve page |
 | `apps/agent` | `llm.ts` Claude research agent; `index.ts` scripted phases (normal / race / labelled attack) |
 | `apps/mcp` | MCP server: `pay_with_firewall` |
 | `apps/sellers` | x402 sellers (Circle Gateway middleware) reselling live NBA data; `/catalog` is free |
